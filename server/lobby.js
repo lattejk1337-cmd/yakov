@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 
 export const MODES = { solo: 1, duo: 2, trio: 3, squad: 4 };
-export const MAP_IDS = ['prison', 'town', 'backrooms'];
+export const MAP_IDS = ['prison', 'town', 'backrooms', 'hospital'];
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const BOT_NAMES = {
   ru: ['Алиса', 'Макс', 'Вера', 'Тимур', 'Соня', 'Гриша', 'Лена', 'Арсений'],

@@ -6,6 +6,8 @@ import { DrawItem } from '../engine/renderer.js';
 import { MAT } from '../engine/textures.js';
 import { ITEM_BY_ID, SKIN_TONES } from './catalog.js';
 import { buildVisual } from './items.js';
+import { Kit } from './props.js';
+import { MeshBuilder } from '../engine/mesh.js';
 import { t } from './i18n.js';
 
 const P = CONFIG.PLAYER;
@@ -53,30 +55,82 @@ export class LocalPlayer {
 
   buildViewmodel() {
     const prims = this.game.prims;
+    const gl = this.game.gl;
     const app = this.s.app;
     const jc = ITEM_BY_ID[app.jacket]?.color || [0.3, 0.3, 0.3];
+    const ac = ITEM_BY_ID[app.jacket]?.accent;
     const skin = SKIN_TONES[app.skin] || SKIN_TONES[1];
-    const mk = (mesh, mat, col, em = 0) => {
-      const d = new DrawItem(mesh, mat, col);
-      d.emissive = em;
-      d.castShadow = false;
-      return d;
+    const knuckle = skin.map((v) => v * 0.9);
+    const buildArm = (withLight, mirror) => {
+      const b = new MeshBuilder(2048);
+      const k = new Kit(b);
+      const sx = mirror ? -1 : 1;
+      // arm space: +Y forward along the forearm, +Z up
+      k.caps(MAT.FABRIC, jc, 0, -0.3, -0.005, 0.105, 0.5, 0.1);
+      k.ring(MAT.FABRIC, jc.map((v) => v * 0.75), 0, -0.065, -0.005, 0.05, 0.014);
+      if (ac) k.ring(MAT.FABRIC, ac, 0, -0.12, -0.005, 0.052, 0.008);
+      // wrist + watch
+      k.caps(MAT.SKIN, skin, 0, -0.04, 0, 0.07, 0.08, 0.06);
+      k.ring(MAT.PAINTED_METAL, [0.08, 0.08, 0.09], 0, -0.035, 0, 0.037, 0.007);
+      k.cyl(MAT.PAINTED_METAL, [0.55, 0.55, 0.58], sx * 0.002, -0.035, 0.035, 0.016, 0.008, Math.PI / 2);
+      k.cyl(MAT.GLASS, [0.15, 0.17, 0.2], sx * 0.002, -0.035, 0.04, 0.013, 0.002, Math.PI / 2);
+      // palm
+      k.ball(MAT.SKIN, skin, sx * 0.012, 0.02, 0.0, 0.085, 0.1, 0.075);
+      if (withLight) {
+        const cz = 0.045;
+        // fingers wrapped around the flashlight body
+        for (let f = 0; f < 4; f++) {
+          const y = -0.005 + f * 0.024;
+          let prev = null;
+          for (let st = 0; st <= 4; st++) {
+            const a = (-0.3 + st * 0.62) * sx;
+            const p = [Math.cos(a) * 0.031 * sx, y, cz + Math.sin(a) * -0.031];
+            const q = [p[0], p[1], p[2]];
+            if (prev) k.seg(MAT.SKIN, st === 4 ? knuckle : skin, prev, q, 0.0105 - st * 0.0005, true);
+            prev = q;
+          }
+          k.ball(MAT.SKIN, knuckle, sx * 0.032, y, cz - 0.018, 0.024, 0.022, 0.024);
+        }
+        // thumb resting on the switch
+        k.seg(MAT.SKIN, skin, [sx * -0.028, -0.005, 0.03], [sx * -0.026, 0.05, cz + 0.012], 0.012, true);
+        k.seg(MAT.SKIN, skin, [sx * -0.026, 0.05, cz + 0.012], [sx * -0.012, 0.09, cz + 0.022], 0.011, true);
+        // flashlight: knurled body, tail cap, head, bezel, switch, lanyard
+        k.cyl(MAT.PAINTED_METAL, [0.09, 0.09, 0.1], 0, 0.08, cz, 0.021, 0.26);
+        for (let i = 0; i < 9; i++) k.ring(MAT.PAINTED_METAL, [0.16, 0.16, 0.18], 0, -0.02 + i * 0.016, cz, 0.0215, 0.0025);
+        k.cyl(MAT.PAINTED_METAL, [0.14, 0.14, 0.15], 0, -0.055, cz, 0.023, 0.025);
+        k.ring(MAT.PAINTED_METAL, [0.5, 0.5, 0.52], 0, -0.072, cz, 0.012, 0.003, Math.PI / 2, 0, 0);
+        k.cyl(MAT.PAINTED_METAL, [0.12, 0.12, 0.13], 0, 0.222, cz, 0.026, 0.03);
+        k.cyl(MAT.PAINTED_METAL, [0.1, 0.1, 0.11], 0, 0.258, cz, 0.033, 0.045);
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2;
+          k.box(MAT.PAINTED_METAL, [0.07, 0.07, 0.08], Math.cos(a) * 0.033, 0.255, cz + Math.sin(a) * 0.033, 0.006, 0.035, 0.006, 0, -a, 0);
+        }
+        k.ring(MAT.PAINTED_METAL, [0.6, 0.6, 0.62], 0, 0.281, cz, 0.031, 0.004);
+        k.box(MAT.PAINTED_METAL, [0.04, 0.04, 0.04], 0, 0.12, cz + 0.022, 0.012, 0.02, 0.008);
+        k.box(MAT.PAINTED_METAL, [0.5, 0.15, 0.1], 0, 0.12, cz + 0.027, 0.008, 0.012, 0.003);
+      } else {
+        // relaxed open hand
+        for (let f = 0; f < 4; f++) {
+          const x = sx * (-0.03 + f * 0.02);
+          k.seg(MAT.SKIN, skin, [x, 0.06, 0.0], [x, 0.11, -0.012], 0.0105, true);
+          k.seg(MAT.SKIN, skin, [x, 0.11, -0.012], [x, 0.14, -0.035], 0.0095, true);
+        }
+        k.seg(MAT.SKIN, skin, [sx * 0.045, 0.01, 0.0], [sx * 0.06, 0.07, 0.01], 0.012, true);
+      }
+      const it = new DrawItem(b.build(gl), -1, [1, 1, 1]);
+      it.castShadow = false;
+      return it;
     };
-    this.vm = {
-      sleeve: mk(prims.cylinder, MAT.FABRIC, jc),
-      cuff: mk(prims.cylinder, MAT.FABRIC, jc.map((c) => c * 0.7)),
-      hand: mk(prims.sphere, MAT.SKIN, skin),
-      thumb: mk(prims.sphere, MAT.SKIN, skin),
-      body: mk(prims.cylinder, MAT.PAINTED_METAL, [0.1, 0.1, 0.11]),
-      head: mk(prims.cylinder, MAT.PAINTED_METAL, [0.14, 0.14, 0.15]),
-      lens: mk(prims.cylinder, MAT.LAMP, [1, 0.95, 0.85], 2),
-      sleeveL: mk(prims.cylinder, MAT.FABRIC, jc),
-      handL: mk(prims.sphere, MAT.SKIN, skin),
-    };
+    const lens = new DrawItem(prims.cylinder, MAT.LAMP, [1, 0.95, 0.85]);
+    lens.emissive = 2;
+    lens.castShadow = false;
+    this.vm = { arm: buildArm(true, false), armL: buildArm(false, true), lens };
     this.vmHeld = null;
     this.vmHeldKind = null;
-    this.vmMat = m4.create();
     this.camWorld = m4.create();
+    this.sway = [0, 0];
+    this.lastLook = [this.s.yaw, this.s.pitch];
+    this.clickT = 0;
   }
 
   setHeldVisual(kind) {
@@ -244,6 +298,7 @@ export class LocalPlayer {
     const s = this.s;
     if (input.pressed('flashlight') && !s.downed && s.hidden === null) {
       s.flashOn = !s.flashOn;
+      this.clickT = 0.15;
       this.game.audio?.play('flash_click', { volume: 0.6 });
     }
     if (s.flashOn && s.battery > 0) {
@@ -455,7 +510,7 @@ export class LocalPlayer {
     f.pos[1] = this.camPos[1] - 0.12 + fwd[1] * 0.45;
     f.pos[2] = this.camPos[2] + right[2] * 0.14 + fwd[2] * 0.45;
     v3.copy(f.dir, this.flashDir);
-    f.intensity = s.flashOn && s.battery > 0 && s.hidden === null && !s.downed ? 2.4 * s.flickerMul() : 0;
+    f.intensity = s.flashOn && s.battery > 0 && s.hidden === null && !s.downed ? 3.0 * s.flickerMul() : 0;
     if (s.hidden !== null) {
       // peeking through locker slits
       cam.fov = settings.fov - 10;
@@ -524,51 +579,57 @@ export class LocalPlayer {
   }
 
   // ------------------------------------------------------------------ viewmodel
-  collectViewmodel(scene, cam) {
+  collectViewmodel(scene, cam, dt = 1 / 60) {
     const s = this.s;
     if (!s.active || s.hidden !== null) return;
     const vm = this.vm;
+    dt = Math.min(Math.max(dt, 1e-3), 0.1);
     m4.invert(this.camWorld, cam.view);
-    const bobX = Math.cos(this.bob * Math.PI * 0.5) * 0.012 * this.bobAmt;
-    const bobY = Math.abs(Math.sin(this.bob * Math.PI)) * 0.018 * this.bobAmt;
+    // inertia: the arm lags behind quick camera turns
+    const dy = angleWrap(s.yaw - this.lastLook[0]), dp = s.pitch - this.lastLook[1];
+    this.lastLook[0] = s.yaw;
+    this.lastLook[1] = s.pitch;
+    this.sway[0] = damp(this.sway[0] + clamp(dy * 1.6, -0.08, 0.08), 0, 9, dt);
+    this.sway[1] = damp(this.sway[1] + clamp(dp * 1.6, -0.08, 0.08), 0, 9, dt);
+    this.clickT = Math.max(0, this.clickT - dt);
+    const t = this.game.time;
+    const idle = Math.sin(t * 1.3) * 0.004;
+    const bobX = Math.cos(this.bob * Math.PI * 0.5) * 0.014 * this.bobAmt + this.sway[0] * 0.25;
+    const bobY = Math.abs(Math.sin(this.bob * Math.PI)) * 0.02 * this.bobAmt - this.sway[1] * 0.2 + idle;
     const down = s.downed ? 0.25 : 0;
-    const sprintTilt = s.sprinting ? 0.25 : 0;
-    // right arm + flashlight. Arm space: +Y forward, +Z up (after the -90° X tilt).
+    const sprint = s.sprinting ? 1 : 0;
+    this.vmSprint = damp(this.vmSprint || 0, sprint, 8, dt);
     const base = (this.vmBase ||= m4.create());
-    const armPose = (x, y, z, yawIn, tilt) => {
+    const armPose = (x, y, z, yawIn, tilt, roll = 0) => {
       m4.translate(base, this.camWorld, x + bobX, y - bobY - down, z);
-      m4.rotateY(base, base, yawIn);
+      m4.rotateY(base, base, yawIn + this.sway[0] * 0.8);
       m4.rotateX(base, base, -Math.PI / 2 + tilt);
+      m4.rotateY(base, base, roll);
     };
-    const part = (item, ox, oy, oz, sx, sy, sz) => {
+    const place = (item, ox = 0, oy = 0, oz = 0, sx = 1, sy = 1, sz = 1) => {
       const m = item.model;
       m4.translate(m, base, ox, oy, oz);
-      m4.scale(m, m, sx, sy, sz);
+      if (sx !== 1 || sy !== 1 || sz !== 1) m4.scale(m, m, sx, sy, sz);
       item.center = cam.pos;
       item.sky = this.game.world.isIndoorAt(s.pos) ? 0 : 1;
       scene.viewmodel.push(item);
     };
-    armPose(0.2, -0.2, -0.44, 0.16, 0.1 + sprintTilt);
-    part(vm.sleeve, 0, -0.3, -0.02, 0.085, 0.46, 0.085);
-    part(vm.cuff, 0, -0.07, -0.015, 0.09, 0.05, 0.09);
-    part(vm.hand, 0, 0.0, 0.0, 0.08, 0.11, 0.085);
-    part(vm.thumb, -0.035, 0.03, 0.03, 0.03, 0.05, 0.03);
-    part(vm.body, 0, 0.09, 0.045, 0.034, 0.3, 0.034);
-    part(vm.head, 0, 0.255, 0.045, 0.05, 0.05, 0.05);
+    const kick = this.clickT > 0 ? Math.sin((this.clickT / 0.15) * Math.PI) * 0.05 : 0;
+    const vs = this.vmSprint;
+    armPose(0.19 + vs * 0.03, -0.2 - vs * 0.04, -0.43 + kick * 0.2, 0.16 + vs * 0.25, 0.1 + vs * 0.35 + kick, -0.15 - vs * 0.5);
+    place(vm.arm);
     vm.lens.emissive = s.flashOn && s.battery > 0 ? 4 : 0;
-    part(vm.lens, 0, 0.282, 0.045, 0.043, 0.006, 0.043);
-    // left hand: held throwable / medkit while healing
-    const showLeft = this.vmHeld || this.healProgress > 0;
-    if (showLeft) {
-      const lx = -0.2, ly = -0.22 + (this.healProgress > 0 ? Math.sin(this.healProgress * 30) * 0.01 : 0), lz = -0.34;
-      armPose(lx, ly, lz, -0.2, 0.2);
-      part(vm.sleeveL, 0, -0.3, -0.02, 0.085, 0.46, 0.085);
-      part(vm.handL, 0, 0, 0, 0.08, 0.11, 0.085);
-      const parts = this.healProgress > 0 ? (this.vmMedkit ||= buildVisual(this.game.prims, 'medkit')) : this.vmHeld;
+    place(vm.lens, 0, 0.2835, 0.045, 0.058, 0.004, 0.058);
+    // left hand: held throwable or medkit while healing
+    const parts = this.healProgress > 0 ? (this.vmMedkit ||= buildVisual(this.game.prims, 'medkit')) : this.vmHeld;
+    if (parts) {
+      const shake = this.healProgress > 0 ? Math.sin(this.healProgress * 30) * 0.01 : 0;
+      armPose(-0.2, -0.24 + shake, -0.42, -0.25, 0.25, 0.4);
+      place(vm.armL);
       for (const p of parts) {
         const m = p.item.model;
-        m4.translate(m, this.camWorld, lx + bobX, ly + 0.06 - bobY - down, lz - 0.06);
-        m4.rotateY(m, m, 0.4);
+        m4.translate(m, base, 0, 0.07, 0.07);
+        m4.rotateX(m, m, Math.PI / 2);
         m4.scale(m, m, 0.6, 0.6, 0.6);
         m4.translate(m, m, p.t[0], p.t[1], p.t[2]);
         if (p.r) {
@@ -582,4 +643,10 @@ export class LocalPlayer {
       }
     }
   }
+}
+
+function angleWrap(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
 }

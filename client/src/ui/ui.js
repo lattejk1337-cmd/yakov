@@ -7,7 +7,7 @@ import { MAPS } from '../game/maps/index.js';
 import { QUALITY_PRESETS } from '../engine/renderer.js';
 
 const rgb = (c) => `rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})`;
-const MON_TIP = { warden: 'tip_warden', scarecrow: 'tip_scarecrow', moth: 'tip_moth' };
+const MON_TIP = { warden: 'tip_warden', scarecrow: 'tip_scarecrow', moth: 'tip_moth', nurse: 'tip_nurse' };
 
 export class UI {
   constructor(app, root) {
@@ -381,11 +381,12 @@ export class UI {
             st.bloom = pr.bloom;
             st.volumetric = pr.volumetric;
             st.fxaa = pr.fxaa;
+            st.ssao = pr.ssao;
             apply(true);
             this.showSettings(from);
           },
         }, t('q_' + q))))));
-      body.append(toggle(t('s_shadows'), 'shadows', true), toggle(t('s_bloom'), 'bloom', true), toggle(t('s_volumetric'), 'volumetric', true), toggle(t('s_fxaa'), 'fxaa', true));
+      body.append(toggle(t('s_shadows'), 'shadows', true), toggle(t('s_bloom'), 'bloom', true), toggle(t('s_volumetric'), 'volumetric', true), toggle(t('s_ssao'), 'ssao', true), toggle(t('s_fxaa'), 'fxaa', true));
       body.append(slider(t('s_resolution'), st.resolution, 0.5, 1, 0.05, (v) => { st.resolution = v; apply(); }));
       body.append(toggle(t('s_dynres'), 'dynres'));
       body.append(slider(t('s_fov'), st.fov, 60, 100, 1, (v) => { st.fov = v; apply(); }, (v) => Math.round(v) + '°'));

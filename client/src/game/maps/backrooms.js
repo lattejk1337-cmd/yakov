@@ -90,9 +90,9 @@ export default {
   },
   baseboard: MAT.WOOD,
   zones: [
-    { x0: 1, z0: 33, x1: 14, z1: 46, floor: MAT.CONCRETE_FLOOR, wall: MAT.CONCRETE, ceil: MAT.CONCRETE },
-    { x0: 29, z0: 29, x1: 46, z1: 46, floor: MAT.TILES, wall: MAT.PLASTER, ceil: MAT.CEILING_TILES },
-    { x0: 38, z0: 35, x1: 46, z1: 46, floor: MAT.METAL_PLATE, wall: MAT.PAINTED_METAL },
+    { x0: 1, z0: 33, x1: 14, z1: 46, floor: MAT.CONCRETE_FLOOR, wall: MAT.CONCRETE, ceil: MAT.CONCRETE, decor: { wall: [['barrels', 2], ['generatorProp', 1], ['cinder', 1], ['crate', 1]], thin: [['pipesWall', 4], ['electricBox', 2]], ceiling: [['pipesWall', 3], ['cables', 1]], floor: [['bloodlessStain', 3], ['debris', 1]], density: { thin: 0.5, ceiling: 0.35 } } },
+    { x0: 38, z0: 35, x1: 46, z1: 46, floor: MAT.METAL_PLATE, wall: MAT.PAINTED_METAL, decor: { wall: [['filing', 1], ['shelf', 1]], thin: [['electricBox', 3], ['exitSign', 1]], ceiling: [['cables', 2]] } },
+    { x0: 29, z0: 29, x1: 46, z1: 46, floor: MAT.TILES, wall: MAT.PLASTER, ceil: MAT.CEILING_TILES, decor: { wall: [['locker', 2], ['shelf', 1], ['boxes', 2], ['bucket', 1]], thin: [['poster', 1], ['extinguisher', 1]] } },
   ],
   lamp: { color: [1.0, 0.95, 0.75], intensity: 4.2, radius: 6.5, flickerChance: 0.22, brokenChance: 0.18, glow: 0.5 },
   lampStyle: 'panel',
@@ -108,6 +108,13 @@ export default {
     wetness: 0,
     dust: { color: [0.008, 0.007, 0.004] },
     volumeDensity: 0.07,
+  },
+  decor: {
+    wall: [['filing', 2], ['cooler', 1], ['plant', 1.5], ['boxes', 2], ['cardboardWall', 1], ['vending', 0.3], ['desk', 1], ['bookshelf', 0.5]],
+    thin: [['poster', 2], ['clock', 1], ['radiator', 1], ['electricBox', 0.5], ['exitSign', 0.3]],
+    floor: [['papers', 3], ['bloodlessStain', 2], ['fallenChair', 1], ['officeChair', 1.5]],
+    ceiling: [['ceilingVent', 2], ['cables', 0.5]],
+    density: { wall: 0.22, thin: 0.25, floor: 0.22, ceiling: 0.15 },
   },
   ambience: 'amb_backrooms',
   objects: {

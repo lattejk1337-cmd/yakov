@@ -48,4 +48,4 @@ export const MODES = {
   squad: { size: 4 },
 };
 
-export const MAP_IDS = ['prison', 'town', 'backrooms'];
+export const MAP_IDS = ['prison', 'town', 'backrooms', 'hospital'];

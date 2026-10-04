@@ -6,6 +6,8 @@ import { PhysicsWorld } from '../engine/physics.js';
 import { DrawItem } from '../engine/renderer.js';
 import { m4, mulberry32, clamp } from '../engine/math.js';
 import { CONFIG } from './config.js';
+import { decorate } from './decor.js';
+import { placePrefab } from './props.js';
 
 const CELL = CONFIG.CELL;
 const CHUNK = 8;
@@ -135,6 +137,7 @@ export class World {
     this.buildFloorsAndCeilings();
     this.buildWalls();
     this.buildCells();
+    decorate(this);
     this.buildColliders();
     if (this.def.decorate) this.def.decorate(this);
     this.buildNav();
@@ -426,7 +429,7 @@ export class World {
     const lampVerts = (min, max) => {
       const start = b.vc;
       b.box(min, max, MAT.LAMP, { uv: 'local' });
-      for (let i = start; i < b.vc; i++) b.v[i * 14 + 13] = idx; // lamp index in sky channel
+      b.setSkyFrom(start, idx); // lamp index in sky channel
     };
     if (style === 'panel') {
       // office fluorescent panel
@@ -448,7 +451,7 @@ export class World {
       m4.scale(m, m, 0.16, 0.2, 0.16);
       const start = b.vc;
       b.append(s, m);
-      for (let i = start; i < b.vc; i++) b.v[i * 14 + 13] = idx;
+      b.setSkyFrom(start, idx);
     }
     const L = this.def.lamp ?? {};
     const r = this.rnd();
@@ -475,7 +478,7 @@ export class World {
     const idx = this.lamps.length;
     const start = b.vc;
     b.box([cx + 0.45, 4.78, cz - 0.15], [cx + 0.85, 4.9, cz + 0.15], MAT.LAMP, { uv: 'local' });
-    for (let i = start; i < b.vc; i++) b.v[i * 14 + 13] = idx;
+    b.setSkyFrom(start, idx);
     this.physics.add({ min: [cx - 0.1, 0, cz - 0.1], max: [cx + 0.1, 5, cz + 0.1], blocksSight: false });
     const L = this.def.streetLamp ?? {};
     const lamp = new Lamp(idx, [cx + 0.65, 4.6, cz], L.color ?? [1, 0.7, 0.4], L.intensity ?? 16, L.radius ?? 12, {
@@ -529,7 +532,7 @@ export class World {
       locked: opts.locked ?? null,
       lockedText: opts.lockedText ?? null,
       sky,
-      monsterCanOpen: opts.monsterCanOpen ?? (kind === 'wood' || kind === 'metal'),
+      monsterCanOpen: opts.monsterCanOpen ?? kind !== 'gate',
     });
     collider.door = door;
     if (kind === 'bars' || kind === 'gate') {
@@ -676,24 +679,16 @@ export class World {
   addTable(x, z) {
     const [cx, , cz] = this.center(x, z);
     const b = this.chunkBuilder(x, z);
-    const ox = (this.rnd() - 0.5) * 0.4, oz = (this.rnd() - 0.5) * 0.4;
-    const w = 0.7, d = 0.5;
-    const tx = cx + ox, tz = cz + oz;
-    const mat = this.def.palette.furniture ?? MAT.WOOD;
-    b.box([tx - w, 0.72, tz - d], [tx + w, 0.78, tz + d], mat, { uv: 'local', ao: 1 });
-    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      b.box([tx + sx * (w - 0.08) - 0.04, 0, tz + sz * (d - 0.08) - 0.04], [tx + sx * (w - 0.08) + 0.04, 0.72, tz + sz * (d - 0.08) + 0.04], mat, { uv: 'local' });
+    const sky = this.type[z][x] === 'out' ? 1 : 0;
+    const yaw = this.rnd() < 0.5 ? 0 : Math.PI / 2;
+    const tx = cx + (this.rnd() - 0.5) * 0.3, tz = cz + (this.rnd() - 0.5) * 0.3;
+    const box = placePrefab(b, 'table', [tx, 0, tz], yaw + (this.rnd() - 0.5) * 0.2, this.rnd, { sky });
+    if (box) this.physics.add({ ...box, blocksSight: false });
+    for (const side of [-1, 1]) {
+      if (this.rnd() < 0.35) continue;
+      const off = yaw === 0 ? [0, side * 0.75] : [side * 0.75, 0];
+      placePrefab(b, this.rnd() < 0.15 ? 'fallenChair' : 'chair', [tx + off[0], 0, tz + off[1]], yaw + (side > 0 ? Math.PI : 0) + (this.rnd() - 0.5) * 0.5, this.rnd, { sky });
     }
-    this.physics.add({ min: [tx - w, 0, tz - d], max: [tx + w, 0.78, tz + d], blocksSight: false, blocksMonster: true });
-    // chair
-    if (this.rnd() < 0.7) {
-      const s = this.rnd() < 0.5 ? -1 : 1;
-      const chx = tx + (this.rnd() - 0.5) * 0.6, chz = tz + s * (d + 0.35);
-      b.box([chx - 0.22, 0.42, chz - 0.22], [chx + 0.22, 0.46, chz + 0.22], mat, { uv: 'local' });
-      b.box([chx - 0.22, 0.46, chz + s * 0.18], [chx + 0.22, 0.95, chz + s * 0.22], mat, { uv: 'local' });
-      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) b.box([chx + sx * 0.18 - 0.02, 0, chz + sz * 0.18 - 0.02], [chx + sx * 0.18 + 0.02, 0.42, chz + sz * 0.18 + 0.02], mat, { uv: 'local' });
-    }
-    this.maybeClutterOn([tx, 0.78, tz], w, d);
   }
 
   maybeClutterOn(top, w, d) {
@@ -712,6 +707,15 @@ export class World {
   }
 
   addBed(x, z) {
+    if (this.def.bed === 'hospital') {
+      const [hx, , hz] = this.center(x, z);
+      const ws = this.wallSide(x, z) || [0, -1];
+      const pos = [hx + ws[0] * 0.05, 0, hz + ws[1] * 0.05];
+      const box = placePrefab(this.chunkBuilder(x, z), 'hospitalBed', pos, Math.atan2(-ws[0], -ws[1]), this.rnd);
+      if (box) this.physics.add({ ...box, blocksSight: false });
+      if (this.rnd() < 0.6) placePrefab(this.chunkBuilder(x, z), 'ivStand', [pos[0] + 0.7, 0, pos[2] + 0.4], 0, this.rnd);
+      return;
+    }
     const [cx, , cz] = this.center(x, z);
     const b = this.chunkBuilder(x, z);
     // bunk bed aligned to the nearest wall
@@ -732,31 +736,10 @@ export class World {
 
   addShelf(x, z) {
     const [cx, , cz] = this.center(x, z);
-    const b = this.chunkBuilder(x, z);
     const ws = this.wallSide(x, z) || [1, 0];
-    const alongX = ws[1] !== 0;
-    const L = 0.85, D = 0.25, Hh = 2.0;
-    const ox = alongX ? cx : cx + ws[0] * 0.7, oz = alongX ? cz + ws[1] * 0.7 : cz;
-    const mat = this.def.palette.shelf ?? MAT.RUST_METAL;
-    const box = (x0, y0, z0, x1, y1, z1, m) => (alongX ? b.box([ox + x0, y0, oz + z0], [ox + x1, y1, oz + z1], m, { uv: 'local' }) : b.box([ox + z0, y0, oz + x0], [ox + z1, y1, oz + x1], m, { uv: 'local' }));
-    for (const s of [-1, 1]) box(s * L - 0.03, 0, -D, s * L + 0.03, Hh, D, mat);
-    for (let i = 0; i < 4; i++) {
-      const y = 0.1 + i * 0.6;
-      box(-L, y, -D, L, y + 0.04, D, mat);
-      // boxes and jars on shelves
-      let px = -L + 0.1;
-      while (px < L - 0.2) {
-        const w = 0.12 + this.rnd() * 0.25;
-        if (this.rnd() < 0.7) {
-          const h = 0.1 + this.rnd() * 0.35;
-          box(px, y + 0.04, -D + 0.04, px + w, y + 0.04 + h, D - 0.04, this.rnd() < 0.6 ? MAT.PAPER : MAT.WOOD);
-        }
-        px += w + 0.05;
-      }
-    }
-    const min = alongX ? [ox - L, 0, oz - D] : [ox - D, 0, oz - L];
-    const max = alongX ? [ox + L, Hh, oz + D] : [ox + D, Hh, oz + L];
-    this.physics.add({ min, max });
+    const pos = [cx + ws[0] * 0.75, 0, cz + ws[1] * 0.75];
+    const box = placePrefab(this.chunkBuilder(x, z), 'shelf', pos, Math.atan2(-ws[0], -ws[1]), this.rnd);
+    if (box) this.physics.add(box);
   }
 
   addLocker(x, z) {
@@ -783,19 +766,10 @@ export class World {
 
   addCrates(x, z) {
     const [cx, , cz] = this.center(x, z);
-    const b = this.chunkBuilder(x, z);
-    let y = 0;
-    const n = 1 + Math.floor(this.rnd() * 3);
-    let maxS = 0;
-    for (let i = 0; i < n; i++) {
-      const s = 0.35 + this.rnd() * 0.25;
-      const ox = (this.rnd() - 0.5) * 0.3, oz = (this.rnd() - 0.5) * 0.3;
-      b.box([cx + ox - s, y, cz + oz - s], [cx + ox + s, y + s * 2, cz + oz + s], MAT.WOOD, { uv: 'local', aoFn: (p) => (p[1] < 0.01 ? 0.6 : 1) });
-      maxS = Math.max(maxS, s + 0.15);
-      y += s * 2;
-    }
-    this.physics.add({ min: [cx - maxS, 0, cz - maxS], max: [cx + maxS, y, cz + maxS], blocksSight: y > 1.4 });
-    if (y > 1.4) this.walk[z][x] = false;
+    const sky = this.type[z][x] === 'out' ? 1 : 0;
+    const name = this.rnd() < 0.5 ? 'crate' : this.rnd() < 0.5 ? 'barrels' : 'boxes';
+    const box = placePrefab(this.chunkBuilder(x, z), name, [cx + (this.rnd() - 0.5) * 0.3, 0, cz + (this.rnd() - 0.5) * 0.3], this.rnd() * Math.PI * 2, this.rnd, { sky });
+    if (box) this.physics.add({ ...box, blocksSight: box.max[1] > 1.4 });
   }
 
   addPillar(x, z) {
@@ -818,67 +792,22 @@ export class World {
 
   addDesk(x, z) {
     const [cx, , cz] = this.center(x, z);
-    const b = this.chunkBuilder(x, z);
     const ws = this.wallSide(x, z);
-    const alongX = ws ? ws[1] !== 0 : this.rnd() < 0.5;
-    const ox = cx + (ws && !alongX ? ws[0] * 0.4 : 0), oz = cz + (ws && alongX ? ws[1] * 0.4 : 0);
-    const L = 0.75, D = 0.38;
-    const box = (x0, y0, z0, x1, y1, z1, m, opts = { uv: 'local' }) => (alongX ? b.box([ox + x0, y0, oz + z0], [ox + x1, y1, oz + z1], m, opts) : b.box([ox + z0, y0, oz + x0], [ox + z1, y1, oz + x1], m, opts));
-    box(-L, 0.72, -D, L, 0.76, D, MAT.WOOD);
-    box(-L, 0, -D, -L + 0.04, 0.72, D, MAT.WOOD);
-    box(L - 0.4, 0, -D, L, 0.72, D, MAT.WOOD);
-    // monitor
-    const s = ws ? (alongX ? ws[1] : ws[0]) : 1;
-    box(-0.25, 0.76, s * 0.1 - 0.12, 0.25, 1.12, s * 0.1 + 0.12, MAT.PAINTED_METAL);
-    box(-0.05, 0.76, -0.05, 0.05, 0.8, 0.05, MAT.PAINTED_METAL);
-    // chair
-    const cs = -s;
-    box(-0.25, 0.45, cs * 0.6 - 0.25, 0.25, 0.5, cs * 0.6 + 0.25, MAT.FABRIC);
-    box(-0.25, 0.5, cs * 0.85 - 0.03, 0.25, 1.0, cs * 0.85 + 0.03, MAT.FABRIC);
-    box(-0.03, 0, cs * 0.6 - 0.03, 0.03, 0.45, cs * 0.6 + 0.03, MAT.PAINTED_METAL);
-    const min = alongX ? [ox - L, 0, oz - D] : [ox - D, 0, oz - L];
-    const max = alongX ? [ox + L, 0.76, oz + D] : [ox + D, 0.76, oz + L];
-    this.physics.add({ min, max, blocksSight: false });
-    this.maybeClutterOn([ox, 0.76, oz], alongX ? L * 0.6 : D, alongX ? D : L * 0.6);
+    const b = this.chunkBuilder(x, z);
+    const yaw = ws ? Math.atan2(-ws[0], -ws[1]) : Math.floor(this.rnd() * 4) * (Math.PI / 2);
+    const off = ws ? [ws[0] * 0.55, ws[1] * 0.55] : [0, 0];
+    const pos = [cx + off[0], 0, cz + off[1]];
+    const box = placePrefab(b, 'desk', pos, yaw, this.rnd);
+    if (box) this.physics.add({ ...box, blocksSight: false });
+    const fwd = [Math.sin(yaw), Math.cos(yaw)];
+    placePrefab(b, 'officeChair', [pos[0] + fwd[0] * 0.65, 0, pos[2] + fwd[1] * 0.65], yaw + Math.PI + (this.rnd() - 0.5) * 0.8, this.rnd);
   }
 
   addCar(x, z) {
     const [cx, , cz] = this.center(x, z);
-    const b = this.chunkBuilder(x, z);
-    const alongX = this.rnd() < 0.5;
-    const L = 2.0, W = 0.85;
-    const colors = [[0.5, 0.1, 0.08], [0.15, 0.2, 0.35], [0.4, 0.4, 0.38], [0.2, 0.3, 0.2], [0.55, 0.5, 0.4]];
-    const col = colors[Math.floor(this.rnd() * colors.length)];
-    const sub = new MeshBuilder(256);
-    sub.box([-L, 0.3, -W], [L, 0.95, W], MAT.PAINTED_METAL, { uv: 'local' });
-    sub.box([-L * 0.45, 0.95, -W * 0.92], [L * 0.45, 1.45, W * 0.92], MAT.GLASS, { uv: 'local' });
-    sub.box([-L * 0.42, 1.45, -W * 0.9], [L * 0.42, 1.5, W * 0.9], MAT.PAINTED_METAL, { uv: 'local' });
-    const wheel = cylinderBuilder(MAT.RUST_METAL, 10, true);
-    const m = m4.create();
-    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      m4.identity(m);
-      m4.translate(m, m, sx * L * 0.65, 0.32, sz * W);
-      m4.rotateX(m, m, Math.PI / 2);
-      m4.scale(m, m, 0.64, 0.25, 0.64);
-      sub.append(wheel, m);
-    }
-    // tint painted metal by baking: we can't tint static geometry per object, so use a material variant
-    m4.identity(m);
-    m4.translate(m, m, cx, 0, cz);
-    if (!alongX) m4.rotateY(m, m, Math.PI / 2);
-    m4.rotateY(m, m, (this.rnd() - 0.5) * 0.3);
-    // dynamic item for colour
-    const item = new DrawItem(sub.build(this.gl), -1);
-    item.setColor(col);
-    item.sky = 1;
-    m4.copy(item.model, m);
-    item.center = [cx, 0.8, cz];
-    item.radius = 2.5;
-    this.dynamicItems.push(item);
-    const min = alongX ? [cx - L, 0, cz - W] : [cx - W, 0, cz - L];
-    const max = alongX ? [cx + L, 1.5, cz + W] : [cx + W, 1.5, cz + L];
-    this.physics.add({ min, max, blocksSight: false });
-    void b;
+    const yaw = (this.rnd() < 0.5 ? 0 : Math.PI / 2) + (this.rnd() - 0.5) * 0.3;
+    const box = placePrefab(this.chunkBuilder(x, z), 'carWreck', [cx, 0, cz], yaw, this.rnd, { sky: 1 });
+    if (box) this.physics.add({ ...box, blocksSight: false });
   }
 
   addTree(x, z) {
@@ -959,9 +888,18 @@ export class World {
     }
   }
 
+  doorAt(x, z) {
+    if (!this.doorMap) {
+      this.doorMap = new Map();
+      for (const d of this.doors) this.doorMap.set(d.x + ',' + d.z, d);
+    }
+    return this.doorMap.get(x + ',' + z) || null;
+  }
+
   canMonsterWalk(x, z) {
     if (!this.navWalk[z]?.[x]) return false;
-    for (const d of this.doors) if (d.x === x && d.z === z) return d.open > 0.5 || (!d.locked && d.monsterCanOpen);
+    const d = this.doorAt(x, z);
+    if (d) return d.open > 0.5 || (!d.locked && d.monsterCanOpen);
     return true;
   }
 

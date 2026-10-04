@@ -4,8 +4,9 @@ import { CONFIG } from './config.js';
 const CELL = CONFIG.CELL;
 
 export class NavGrid {
-  constructor(world, walkFn) {
+  constructor(world, walkFn, opts = {}) {
     this.world = world;
+    this.doorFn = opts.door || null;
     this.w = world.w;
     this.h = world.h;
     this.walkFn = walkFn;
@@ -113,7 +114,11 @@ export class NavGrid {
     const cells = [];
     for (let i = goal; i !== -1; i = this.parent[i]) cells.push(i);
     cells.reverse();
-    const pts = cells.map((i) => [((i % W) + 0.5) * CELL, 0, (((i / W) | 0) + 0.5) * CELL]);
+    const pts = cells.map((i) => {
+      const x = i % W, z = (i / W) | 0;
+      const door = this.doorFn && this.doorFn(x, z);
+      return door ? [door.pos[0], 0, door.pos[2]] : [(x + 0.5) * CELL, 0, (z + 0.5) * CELL];
+    });
     if (pts.length) pts[pts.length - 1] = [to[0], 0, to[2]];
     // string pulling over walkable cells
     const out = [];
@@ -134,9 +139,24 @@ export class NavGrid {
     for (let s = 1; s < steps; s++) {
       const t = s / steps;
       const x = a[0] + (b[0] - a[0]) * t, z = a[2] + (b[2] - a[2]) * t;
+      const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+      // doorways are narrow: the line must pass close to the door's centre line
+      const door = this.doorFn && this.doorFn(cx, cz);
+      if (door) {
+        const lateral = door.axis === 'x' ? Math.abs(x - door.pos[0]) : Math.abs(z - door.pos[2]);
+        if (lateral > 0.22) return false;
+        continue;
+      }
       // check a small square around the line point (monster width)
       for (const [ox, oz] of [[0.45, 0.45], [-0.45, 0.45], [0.45, -0.45], [-0.45, -0.45]]) {
-        if (!this.walkable(Math.floor((x + ox) / CELL), Math.floor((z + oz) / CELL))) return false;
+        const fx = Math.floor((x + ox) / CELL), fz = Math.floor((z + oz) / CELL);
+        if (!this.walkable(fx, fz)) return false;
+        const dd = this.doorFn && (fx !== cx || fz !== cz) && this.doorFn(fx, fz);
+        if (dd) {
+          // the monster's shoulder would clip a door jamb
+          const lat = dd.axis === 'x' ? Math.abs(x + ox - dd.pos[0]) : Math.abs(z + oz - dd.pos[2]);
+          if (lat > 0.62) return false;
+        }
       }
     }
     return true;

@@ -27,7 +27,7 @@ await page.evaluate(() => { const a = window.__app; a.profile.data.settings.qual
 await page.mouse.click(640, 360);
 await page.waitForTimeout(1500);
 await page.screenshot({ path: path.join(outDir, 'menu.png') });
-const maps = (process.env.MAPS || 'prison,town,backrooms').split(',');
+const maps = (process.env.MAPS || 'prison,town,backrooms,hospital').split(',');
 for (const map of maps) {
   await page.evaluate((m) => window.__app.startLocalMatch('squad', m), map);
   await page.waitForFunction(() => window.__app.state === 'match', null, { timeout: 60000 });

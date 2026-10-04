@@ -5,7 +5,7 @@ import { Prop } from '../engine/physics.js';
 import { m4, mulberry32 } from '../engine/math.js';
 
 export const PERSONAL = new Set(['medkit', 'adrenaline', 'battery']);
-export const TEAM_ITEMS = new Set(['fuse', 'key', 'gas', 'keycard']);
+export const TEAM_ITEMS = new Set(['fuse', 'key', 'gas', 'keycard', 'tape']);
 
 function buildVisual(prims, kind) {
   const parts = [];
@@ -50,6 +50,12 @@ function buildVisual(prims, kind) {
     case 'keycard':
       add(prims.cube, MAT.PAINTED_METAL, [0.15, 0.35, 0.8], [0, 0.005, 0], [0.16, 0.008, 0.1], null, 0.4);
       add(prims.cube, MAT.PAINTED_METAL, [0.95, 0.95, 0.95], [0, 0.011, 0.025], [0.14, 0.002, 0.02], null, 0.6);
+      break;
+    case 'tape':
+      add(prims.cube, MAT.PAINTED_METAL, [0.08, 0.08, 0.09], [0, 0.012, 0], [0.11, 0.022, 0.07], null, 0.2);
+      add(prims.cube, MAT.PAPER, [0.9, 0.85, 0.6], [0, 0.024, 0.008], [0.08, 0.002, 0.035], null, 0.3);
+      add(prims.cylinder, MAT.PAINTED_METAL, [0.85, 0.85, 0.85], [-0.025, 0.025, -0.01], [0.018, 0.004, 0.018]);
+      add(prims.cylinder, MAT.PAINTED_METAL, [0.85, 0.85, 0.85], [0.025, 0.025, -0.01], [0.018, 0.004, 0.018]);
       break;
     case 'bottle':
       add(prims.cylinder, MAT.GLASS, [0.3, 0.6, 0.35], [0, 0, 0], [0.12, 0.26, 0.12]);

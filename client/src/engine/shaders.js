@@ -11,6 +11,7 @@ layout(location=1) in vec3 aNormal;
 layout(location=2) in vec3 aTangent;
 layout(location=3) in vec2 aUV;
 layout(location=4) in vec3 aAttr;
+layout(location=5) in vec3 aColor;
 uniform mat4 uViewProj;
 uniform mat4 uModel;
 uniform mat3 uNormalMat;
@@ -20,7 +21,9 @@ out vec3 vN;
 out vec3 vT;
 out vec2 vUV;
 out vec3 vAttr;
+out vec3 vColor;
 void main(){
+  vColor = aColor;
   vec4 wp = uModel * vec4(aPos, 1.0);
   vPos = wp.xyz;
   vN = normalize(uNormalMat * aNormal);
@@ -40,6 +43,7 @@ in vec3 vN;
 in vec3 vT;
 in vec2 vUV;
 in vec3 vAttr;
+in vec3 vColor;
 uniform sampler2DArray uAlbedo;
 uniform sampler2DArray uNormalMap;
 uniform sampler2D uDecal;
@@ -60,6 +64,9 @@ uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform float uTime;
 uniform float uWetness;
+uniform float uGroundFog;
+uniform float uDetail;
+uniform float uAlphaOut;
 
 uniform int uNumPoint;
 uniform vec4 uPointPos[MAX_POINT];
@@ -132,7 +139,14 @@ void main(){
     alb = texture(uAlbedo, vec3(vUV, mat));
     nTex = texture(uNormalMap, vec3(vUV, mat)).xyz * 2.0 - 1.0;
   }
-  vec3 albedo = alb.rgb * uTint.rgb;
+  // close-range detail: a second, finer sample of the same material breaks up texture blur
+  float camDist = length(uCamPos - vPos);
+  if (uDetail > 0.0 && uUseDecal < 0.5 && camDist < 6.0) {
+    vec4 det = texture(uAlbedo, vec3(vUV * 4.37, mat));
+    float l = dot(det.rgb, vec3(0.333));
+    alb.rgb *= mix(1.0, clamp(l * 2.2, 0.6, 1.4), uDetail * (1.0 - camDist / 6.0));
+  }
+  vec3 albedo = alb.rgb * uTint.rgb * vColor;
   float rough = alb.a;
   // global wetness (rainy maps) lowers roughness on upward surfaces
   rough = mix(rough, rough * 0.35, uWetness * sky * smoothstep(0.5, 0.9, vN.y));
@@ -182,7 +196,7 @@ void main(){
     float cone = smoothstep(cosO, cosI, cosA);
     float t = clamp((1.0 - cosA) / max(1.0 - cosO, 1e-4), 0.0, 1.0);
     float win = clamp(1.0 - pow(d / range, 4.0), 0.0, 1.0);
-    float att = win * win / (d * d * 0.12 + 1.0) * cone * cookie(sqrt(t));
+    float att = win * win / (d * d * 0.1 + 1.0) * cone * cookie(sqrt(t));
     float ndlG = max(dot(Ng, L), 0.0);
     float ndl = max(dot(N, L), 0.0);
     float shadow = spotShadow(i, vPos, Ng, ndlG);
@@ -217,15 +231,16 @@ void main(){
   }
   color += uTint.rgb * uEmissive;
 
-  // exponential fog
-  float dist = length(uCamPos - vPos);
-  float fog = 1.0 - exp(-dist * uFogDensity);
+  // exponential fog + low ground mist
+  float dist = camDist;
+  float mist = uGroundFog * exp(-max(vPos.y, 0.0) * 1.6);
+  float fog = 1.0 - exp(-dist * (uFogDensity + mist));
   color = mix(color, uFogColor, fog);
 
 #ifdef LDR_OUTPUT
   color = color / (color + vec3(1.0));
 #endif
-  outColor = vec4(color, 1.0);
+  outColor = vec4(color, uAlphaOut);
 }`;
 
 export const DEPTH_VS = `
@@ -498,6 +513,9 @@ uniform float uFade;
 uniform vec2 uResolution;
 uniform float uHasBloom;
 uniform float uHasVolume;
+uniform sampler2D uAO;
+uniform float uHasAO;
+uniform vec2 uAOTexel;
 out vec4 o;
 vec3 aces(vec3 x){
   const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
@@ -514,6 +532,16 @@ void main(){
   col.r = texture(uScene, uv - cdir * ca * 2.0).r;
   col.g = texture(uScene, uv).g;
   col.b = texture(uScene, uv + cdir * ca * 2.0).b;
+  if (uHasAO > 0.5) {
+    float ao = texture(uAO, uv).r * 0.4;
+    ao += texture(uAO, uv + uAOTexel * vec2(1.5, 0.5)).r * 0.15;
+    ao += texture(uAO, uv + uAOTexel * vec2(-1.5, -0.5)).r * 0.15;
+    ao += texture(uAO, uv + uAOTexel * vec2(0.5, -1.5)).r * 0.15;
+    ao += texture(uAO, uv + uAOTexel * vec2(-0.5, 1.5)).r * 0.15;
+    // alpha = 0 marks first-person viewmodel pixels (no world AO on the hands)
+    float world = texture(uScene, uv).a;
+    col *= mix(1.0, ao, clamp(world, 0.0, 1.0));
+  }
 #ifndef LDR_INPUT
   if (uHasBloom > 0.5) col += texture(uBloom, uv).rgb * uBloomStrength;
   if (uHasVolume > 0.5) col += texture(uVolume, uv).rgb * uVolStrength;
@@ -572,3 +600,47 @@ in vec2 vUV;
 uniform sampler2D uSrc;
 out vec4 o;
 void main(){ o = vec4(texture(uSrc, vUV).rgb, 1.0); }`;
+
+export const SSAO_FS = `
+precision highp float;
+${COMMON}
+in vec2 vUV;
+uniform sampler2D uDepth;
+uniform mat4 uProj;
+uniform mat4 uInvProj;
+uniform float uRadius;
+uniform float uStrength;
+out vec4 o;
+const vec3 K[12] = vec3[](
+  vec3(0.53, 0.12, 0.47), vec3(-0.41, 0.33, 0.29), vec3(0.18, -0.55, 0.33), vec3(-0.2, -0.17, 0.72),
+  vec3(0.71, -0.3, 0.2), vec3(-0.62, -0.42, 0.18), vec3(0.08, 0.68, 0.4), vec3(-0.12, 0.05, 0.31),
+  vec3(0.32, 0.31, 0.12), vec3(-0.85, 0.12, 0.42), vec3(0.4, -0.08, 0.85), vec3(0.0, -0.9, 0.35)
+);
+vec3 viewPos(vec2 uv){
+  float d = texture(uDepth, uv).r;
+  vec4 p = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+  return p.xyz / p.w;
+}
+void main(){
+  float d0 = texture(uDepth, vUV).r;
+  if (d0 >= 0.99999) { o = vec4(1.0); return; }
+  vec3 P = viewPos(vUV);
+  vec3 N = normalize(cross(dFdx(P), dFdy(P)));
+  float a = ign(gl_FragCoord.xy) * 6.2831853;
+  vec3 rv = vec3(cos(a), sin(a), 0.0);
+  vec3 T = normalize(rv - N * dot(rv, N));
+  vec3 B = cross(N, T);
+  float r = uRadius;
+  float occ = 0.0;
+  for (int i = 0; i < 12; i++) {
+    vec3 S = P + (T * K[i].x + B * K[i].y + N * K[i].z) * r;
+    vec4 c = uProj * vec4(S, 1.0);
+    vec2 uv = c.xy / c.w * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) continue;
+    float sd = viewPos(uv).z;
+    float range = smoothstep(0.0, 1.0, r / max(abs(P.z - sd), 1e-3));
+    occ += (sd >= S.z + 0.03 ? 1.0 : 0.0) * range;
+  }
+  float ao = clamp(1.0 - occ / 12.0 * uStrength, 0.0, 1.0);
+  o = vec4(vec3(ao), 1.0);
+}`;

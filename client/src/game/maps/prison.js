@@ -2,6 +2,13 @@
 import { GridBuilder } from './gridbuilder.js';
 import { MAT } from '../../engine/textures.js';
 
+const CELL_DECOR = {
+  wall: [['toilet', 2], ['sink', 2], ['bucket', 1], ['boxes', 1]],
+  thin: [['poster', 1], ['wallShelf', 1], ['pipesWall', 1]],
+  floor: [['mattress', 1], ['papers', 2], ['foodTray', 1], ['debris', 1]],
+  density: { wall: 0.4, thin: 0.3, floor: 0.35 },
+};
+
 function layout() {
   const g = new GridBuilder(46, 40, '#', 7);
   // ---------------- yard (north, outdoor)
@@ -137,13 +144,19 @@ export default {
     furniture: MAT.RUST_METAL,
   },
   zones: [
+    { x0: 1, z0: 13, x1: 16, z1: 14, powerGroup: 'block', decor: CELL_DECOR },
+    { x0: 29, z0: 13, x1: 44, z1: 14, powerGroup: 'block', decor: CELL_DECOR },
+    { x0: 1, z0: 20, x1: 16, z1: 21, powerGroup: 'block', decor: CELL_DECOR },
+    { x0: 29, z0: 20, x1: 44, z1: 21, powerGroup: 'block', decor: CELL_DECOR },
     { x0: 1, z0: 13, x1: 44, z1: 21, powerGroup: 'block' },
+    { x0: 1, z0: 23, x1: 8, z1: 25, decor: { wall: [['crate', 2], ['boxes', 3], ['barrels', 2], ['shelf', 2], ['pallet', 1], ['tires', 1]], density: { wall: 0.5 } } },
+    { x0: 28, z0: 23, x1: 35, z1: 25, decor: { wall: [['locker', 3], ['table', 1], ['filing', 1], ['cooler', 1]], floor: [['papers', 2], ['fallenChair', 1]] } },
     { x0: 10, z0: 23, x1: 16, z1: 25, floor: MAT.TILES, wall: MAT.TILES },
     { x0: 37, z0: 23, x1: 44, z1: 25, floor: MAT.TILES, wall: MAT.TILES },
-    { x0: 9, z0: 30, x1: 22, z1: 37, floor: MAT.TILES },
-    { x0: 24, z0: 30, x1: 30, z1: 37, floor: MAT.TILES, wall: MAT.TILES },
-    { x0: 32, z0: 30, x1: 44, z1: 37, floor: MAT.WOOD, wall: MAT.PLASTER },
-    { x0: 1, z0: 30, x1: 7, z1: 37, powerGroup: 'switch' },
+    { x0: 9, z0: 30, x1: 22, z1: 37, floor: MAT.TILES, decor: { wall: [['vending', 1], ['trashCan', 2], ['shelf', 1], ['boxes', 1]], floor: [['foodTray', 3], ['fallenChair', 2], ['papers', 1]], density: { floor: 0.35 } } },
+    { x0: 24, z0: 30, x1: 30, z1: 37, floor: MAT.TILES, wall: MAT.TILES, decor: { wall: [['shelf', 2], ['barrels', 1], ['sink', 2], ['boxes', 2]], density: { wall: 0.5 } } },
+    { x0: 32, z0: 30, x1: 44, z1: 37, floor: MAT.WOOD, wall: MAT.PLASTER, decor: { wall: [['bookshelf', 3], ['filing', 2], ['plant', 1], ['desk', 1]], thin: [['poster', 2], ['clock', 1], ['wallShelf', 1]], floor: [['papers', 3]], density: { wall: 0.45 } } },
+    { x0: 1, z0: 30, x1: 7, z1: 37, powerGroup: 'switch', decor: { wall: [['generatorProp', 1], ['barrels', 1], ['crate', 1]], thin: [['electricBox', 3], ['pipesWall', 1]], ceiling: [['cables', 3]], density: { thin: 0.6, ceiling: 0.4 } } },
   ],
   lamp: { color: [1.0, 0.82, 0.58], intensity: 6.5, radius: 8.5, flickerChance: 0.3, brokenChance: 0.12, glow: 0.8 },
   lampStyle: 'cage',
@@ -163,6 +176,14 @@ export default {
     wetness: 0.6,
     dust: { color: [0.004, 0.004, 0.005] },
     volumeDensity: 0.08,
+  },
+  decor: {
+    wall: [['barrels', 2], ['crate', 2], ['boxes', 3], ['locker', 1], ['trashCan', 1], ['cinder', 1], ['bucket', 1], ['tires', 0.5]],
+    thin: [['pipesWall', 3], ['radiator', 2], ['poster', 1], ['extinguisher', 1], ['electricBox', 2], ['cables', 2]],
+    floor: [['papers', 2], ['debris', 3], ['trashBag', 1], ['bloodlessStain', 2], ['fallenChair', 0.6]],
+    ceiling: [['cables', 2], ['cobweb', 2], ['pipesWall', 2]],
+    outdoor: [['grass', 5], ['bush', 2], ['debris', 2], ['trashBag', 1], ['barrels', 1], ['tires', 1], ['cinder', 1], ['barrier', 0.5]],
+    density: { wall: 0.28, thin: 0.3, floor: 0.3, ceiling: 0.2, outdoor: 0.35 },
   },
   ambience: 'amb_prison',
   objects: {

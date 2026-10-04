@@ -16,7 +16,7 @@ page.on('console', (m) => { if (m.type() === 'error' && !/sdk\.js|Failed to load
 await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => window.__app && window.__app.state === 'menu', null, { timeout: 120000 });
 
-for (const map of ['prison', 'town', 'backrooms']) {
+for (const map of ['prison', 'town', 'backrooms', 'hospital']) {
   await page.evaluate((m) => window.__app.startLocalMatch('solo', m), map);
   await page.waitForFunction(() => window.__app.state === 'match', null, { timeout: 60000 });
   const log = await page.evaluate(async () => {

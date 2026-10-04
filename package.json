@@ -9,7 +9,7 @@
     "build": "node tools/build.mjs",
     "test": "node tests/server.test.mjs && node tests/maps.test.mjs",
     "test:smoke": "node tests/smoke.mjs",
-    "test:e2e": "node tests/smoke.mjs && node tests/gameplay.mjs && node tests/multiplayer.mjs",
+    "test:e2e": "node tests/smoke.mjs && node tests/gameplay.mjs && node tests/multiplayer.mjs && node tests/doors.mjs",
     "lint": "eslint client server tools tests"
   },
   "engines": {

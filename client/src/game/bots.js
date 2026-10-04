@@ -368,6 +368,7 @@ export class BotBrain {
   updateSenses() {
     const s = this.s, g = this.game;
     const m = g.monster;
+    s.heart = m ? Math.max(0, 1 - v3.distXZ(m.pos, s.pos) / 20) * (m.state === 'chase' ? 1 : 0.6) : 0;
     if (!m || m.type !== 'scarecrow') {
       s.seesMonster = false;
       return;

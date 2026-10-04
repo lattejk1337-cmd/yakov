@@ -10,6 +10,7 @@ export function defaultSettings(isMobile) {
     shadows: true,
     bloom: !isMobile,
     volumetric: !isMobile,
+    ssao: !isMobile,
     fxaa: !isMobile,
     resolution: 1,
     dynres: true,

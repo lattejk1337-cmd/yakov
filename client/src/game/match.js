@@ -5,6 +5,7 @@ import { MAPS } from './maps/index.js';
 import { Items, PERSONAL, TEAM_ITEMS } from './items.js';
 import { Puzzles } from './puzzles.js';
 import { Monster } from './monsters.js';
+import { MonsterModel } from './monstermodels.js';
 import { Survivor } from './survivor.js';
 import { LocalPlayer } from './player.js';
 import { BotBrain } from './bots.js';
@@ -365,7 +366,7 @@ export class Match {
     if (!s.active || s.downed) return;
     s.health -= fromHide ? 2 : 1;
     this.audio?.play('hurt', { volume: 1 });
-    this.audio?.play('stinger', { volume: 0.6 });
+    this.startJumpscare();
     if (s.health <= 0) {
       s.health = 0;
       s.downed = true;
@@ -374,6 +375,58 @@ export class Match {
     }
     this.player.onHit(s.downed);
     this.sendT = 0; // push state immediately
+  }
+
+  // ------------------------------------------------------------------ scares
+  startJumpscare() {
+    if (this.scare > 0) return;
+    this.scare = 1.15;
+    this.monster.attackAnim = 1;
+    this.audio?.play(this.monster.def.scream === 'growl' ? 'growl' : 'scream', { volume: 1, rate: 1.1 });
+    this.audio?.play('scream', { volume: 0.8, rate: 0.75 });
+    this.audio?.play('stinger', { volume: 1 });
+  }
+
+  updateScares(dt) {
+    const me = this.local, m = this.monster;
+    // chase stinger when the monster locks on to us
+    const hunted = m.state === 'chase' && m.target === me.id;
+    if (hunted && !this.wasHunted) {
+      this.audio?.play('stinger', { volume: 0.55 });
+      this.player.fovKick = -8;
+      this.hud.flashRed?.();
+    }
+    this.wasHunted = hunted;
+    // phantom apparitions: the monster seems to stand at the end of a corridor, then vanishes
+    this.phantomT = (this.phantomT ?? 70 + this.rnd() * 60) - dt;
+    const ph = this.phantom;
+    if (ph && ph.t > 0) {
+      ph.t -= dt;
+      const d = v3.distXZ(ph.model.pos, me.pos);
+      if (d < 5 || ph.t <= 0) {
+        ph.t = 0;
+        this.audio?.play('whisper', { pos: ph.model.pos, volume: 0.8, rate: 1.4 });
+      }
+      ph.model.dim = Math.min(1, ph.t * 2);
+      ph.model.animate(dt, { speed: 0, state: 'listen', lookAt: me.pos });
+      ph.model.setSky(this.world.isIndoorAt(ph.model.pos) ? 0 : 1);
+      for (const l of this.world.lamps) if (v3.distXZ(l.pos, ph.model.pos) < 6) l.disturb = 1;
+    } else if (this.phantomT <= 0 && me.active && !me.downed && v3.distXZ(m.pos, me.pos) > 22) {
+      this.phantomT = 90 + this.rnd() * 120;
+      const fwd = v3.fromYawPitch([0, 0, 0], me.yaw, 0);
+      const eye = [me.pos[0], 1.5, me.pos[2]];
+      const hit = this.world.physics.raycast(eye, fwd, 16);
+      const dist = hit ? hit.t - 1.2 : 14;
+      if (dist > 7) {
+        if (!this.phantom) this.phantom = { model: new MonsterModel(this, this.monster.type), t: 0 };
+        const pm = this.phantom.model;
+        pm.pos = [me.pos[0] + fwd[0] * dist, 0, me.pos[2] + fwd[2] * dist];
+        pm.yaw = me.yaw + Math.PI;
+        pm.lastPos = null;
+        this.phantom.t = 1.6;
+        this.audio?.play('stinger', { volume: 0.45 });
+      }
+    }
   }
 
   localDied() {
@@ -575,7 +628,12 @@ export class Match {
     for (let i = 1; i <= 4; i++) if (input.pressed('chat' + i)) this.quickChat(i);
     if (input.pressed('chat')) this.ui.openChatWheel((i) => this.quickChat(i));
 
-    this.player.update(dt, input, this.cam);
+    if (this.scare > 0) {
+      this.scare -= dt;
+      input.consumeLook();
+    } else this.player.update(dt, input, this.cam);
+    this.local.heart = this.player.fear;
+    this.updateScares(dt);
     // host simulation
     if (this.isHost) {
       for (const s of this.survivors) if (s.brain) s.brain.update(dt);
@@ -674,16 +732,47 @@ export class Match {
     if (this.busLights) sc.spotLights.push(...this.busLights);
     this.monster.update(dt, this.cam);
     this.monster.collect(sc);
-    this.player.collectViewmodel(sc, this.cam);
+    if (this.phantom && this.phantom.t > 0) this.phantom.model.collect(sc.dynamic);
+    if (this.scare > 0) this.scareCamera();
+    this.player.collectViewmodel(sc, this.cam, dt);
     // post effects
     const post = this.renderer.post;
     post.fear = this.player.fear;
     post.damage = Math.max(this.player.damageFlash, local.health === 1 ? 0.25 + Math.sin(this.time * 3) * 0.08 : 0, local.downed ? 0.6 : 0);
     post.desat = local.downed ? 0.6 : local.dead ? 1 : 0;
+    if (this.scare > 0) {
+      post.damage = 1;
+      post.fear = 1.5;
+      sc.viewmodel.length = 0;
+    }
     post.vignette = 0.4 + (local.hidden !== null ? 1.2 : 0);
     sc.env = this.def.env;
     this.renderer.render(sc, this.cam, dt);
     this.hud.update(this, dt);
+  }
+
+  // camera snaps into the monster's face
+  scareCamera() {
+    const m = this.monster.model;
+    const head = m.headPos();
+    const fwd = [-Math.sin(m.yaw), 0, -Math.cos(m.yaw)];
+    const k = 1 - this.scare / 1.15;
+    const dist = 0.95 - k * 0.45;
+    const shake = 0.06 * (1 - k * 0.5);
+    this.cam.pos[0] = head[0] + fwd[0] * dist + (Math.random() - 0.5) * shake;
+    this.cam.pos[1] = head[1] - 0.05 + (Math.random() - 0.5) * shake;
+    this.cam.pos[2] = head[2] + fwd[2] * dist + (Math.random() - 0.5) * shake;
+    this.cam.yaw = m.yaw + Math.PI;
+    this.cam.pitch = -0.05 + (Math.random() - 0.5) * 0.05;
+    this.cam.roll = (Math.random() - 0.5) * 0.12;
+    this.cam.fov = 58 - k * 12;
+    // light the face
+    const f = this.local.flash;
+    f.pos[0] = this.cam.pos[0];
+    f.pos[1] = this.cam.pos[1] - 0.2;
+    f.pos[2] = this.cam.pos[2];
+    v3.norm(f.dir, [head[0] - f.pos[0], head[1] - f.pos[1], head[2] - f.pos[2]]);
+    f.intensity = 2.6 * (Math.random() < 0.2 ? 0.3 : 1);
   }
 
   dispose() {

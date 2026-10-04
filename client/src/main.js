@@ -148,6 +148,7 @@ class App {
     q.volumetric = st.volumetric && this.renderer.hdr;
     q.volSteps = base.volSteps || 12;
     q.fxaa = st.fxaa;
+    q.ssao = st.ssao ?? base.ssao;
     q.scale = base.scale * st.resolution;
     this.baseScale = q.scale;
     if (rebuild || !this.renderer.q) this.renderer.configure(q);
@@ -296,7 +297,7 @@ class App {
       sdk.gameplayStart();
       const def = this.match.def;
       this.hud.banner(t(def.name), '');
-      setTimeout(() => this.match && this.hud.toast(t('mon_' + def.monster) + ': ' + t({ warden: 'tip_warden', scarecrow: 'tip_scarecrow', moth: 'tip_moth' }[def.monster])), 1500);
+      setTimeout(() => this.match && this.hud.toast(t('mon_' + def.monster) + ': ' + t('tip_' + def.monster)), 1500);
       if (!profile.data.tutorial) {
         profile.data.tutorial = true;
         setTimeout(() => this.match && this.hud.toast(this.input.isTouch ? '🕹' : t('help_move')), 4000);

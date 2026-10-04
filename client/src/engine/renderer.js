@@ -6,10 +6,10 @@ import { m4, Frustum, v3 } from './math.js';
 import { MAT, MAT_INFO, MAT_COUNT } from './textures.js';
 
 export const QUALITY_PRESETS = {
-  low: { scale: 0.6, maxDpr: 1, shadowSize: 1024, shadowTaps: 1, maxShadowed: 1, maxPoint: 6, bloom: false, volumetric: false, volSteps: 0, fxaa: false, particles: 150, texSize: 256 },
-  medium: { scale: 0.75, maxDpr: 1.25, shadowSize: 1024, shadowTaps: 4, maxShadowed: 2, maxPoint: 10, bloom: true, volumetric: false, volSteps: 0, fxaa: true, particles: 400, texSize: 256 },
-  high: { scale: 0.9, maxDpr: 1.5, shadowSize: 2048, shadowTaps: 8, maxShadowed: 4, maxPoint: 14, bloom: true, volumetric: true, volSteps: 14, fxaa: true, particles: 800, texSize: 512 },
-  ultra: { scale: 1.0, maxDpr: 2, shadowSize: 4096, shadowTaps: 16, maxShadowed: 4, maxPoint: 16, bloom: true, volumetric: true, volSteps: 22, fxaa: true, particles: 1400, texSize: 512 },
+  low: { ssao: false, scale: 0.6, maxDpr: 1, shadowSize: 1024, shadowTaps: 1, maxShadowed: 1, maxPoint: 6, bloom: false, volumetric: false, volSteps: 0, fxaa: false, particles: 150, texSize: 256 },
+  medium: { ssao: false, scale: 0.75, maxDpr: 1.25, shadowSize: 1024, shadowTaps: 4, maxShadowed: 2, maxPoint: 10, bloom: true, volumetric: false, volSteps: 0, fxaa: true, particles: 400, texSize: 256 },
+  high: { ssao: true, scale: 0.9, maxDpr: 1.5, shadowSize: 2048, shadowTaps: 8, maxShadowed: 4, maxPoint: 14, bloom: true, volumetric: true, volSteps: 14, fxaa: true, particles: 800, texSize: 512 },
+  ultra: { ssao: true, scale: 1.0, maxDpr: 2, shadowSize: 4096, shadowTaps: 16, maxShadowed: 4, maxPoint: 16, bloom: true, volumetric: true, volSteps: 22, fxaa: true, particles: 1400, texSize: 512 },
 };
 
 const MAX_SPOT = 4;
@@ -30,6 +30,7 @@ export class Camera {
     this.proj = m4.create();
     this.viewProj = m4.create();
     this.invViewProj = m4.create();
+    this.invProj = m4.create();
     this.frustum = new Frustum();
     this.forward = [0, 0, -1];
     this._target = [0, 0, 0];
@@ -45,6 +46,7 @@ export class Camera {
     m4.perspective(this.proj, (this.fov * Math.PI) / 180, this.aspect, this.near, this.far);
     m4.mul(this.viewProj, this.proj, this.view);
     m4.invert(this.invViewProj, this.viewProj);
+    m4.invert(this.invProj, this.proj);
     this.frustum.fromMatrix(this.viewProj);
   }
 }
@@ -162,6 +164,7 @@ export class Renderer {
     this.progPrefilter = new Program(gl, FULLSCREEN_VS, S.BLOOM_PREFILTER_FS, {}, 'prefilter');
     this.progDown = new Program(gl, FULLSCREEN_VS, S.DOWNSAMPLE_FS, {}, 'down');
     this.progUp = new Program(gl, FULLSCREEN_VS, S.UPSAMPLE_FS, {}, 'up');
+    this.progSSAO = q.ssao ? new Program(gl, FULLSCREEN_VS, S.SSAO_FS, {}, 'ssao') : null;
     this.progComposite = new Program(gl, FULLSCREEN_VS, S.COMPOSITE_FS, this.hdr ? {} : { LDR_INPUT: 1 }, 'composite');
     this.progFxaa = new Program(gl, FULLSCREEN_VS, S.FXAA_FS, {}, 'fxaa');
 
@@ -227,6 +230,8 @@ export class Renderer {
     const vw = Math.max(1, sw >> 1), vh = Math.max(1, sh >> 1);
     if (!this.volumeTarget) this.volumeTarget = new RenderTarget(gl, vw, vh, { colors: [half] });
     else this.volumeTarget.resize(vw, vh);
+    if (!this.aoTarget) this.aoTarget = new RenderTarget(gl, vw, vh, { colors: [{ internal: gl.RGBA8 }] });
+    else this.aoTarget.resize(vw, vh);
     if (!this.ldrTarget) this.ldrTarget = new RenderTarget(gl, cw, ch, { colors: [{ internal: gl.RGBA8 }] });
     else this.ldrTarget.resize(cw, ch);
   }
@@ -353,6 +358,9 @@ export class Renderer {
     p.set('uFogColor', env.fogColor);
     p.set('uFogDensity', env.fogDensity);
     p.set('uWetness', env.wetness ?? 0);
+    p.set('uGroundFog', env.groundFog ?? 0);
+    p.set('uDetail', this.q.texSize >= 512 ? 0.5 : 0.35);
+    p.set('uAlphaOut', 1);
     p.set('uTime', this.time);
     p.set('uMatEmissive', this.matEmissive);
     p.set('uLampMat', MAT.LAMP);
@@ -542,6 +550,22 @@ export class Renderer {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
+    // ----- screen-space ambient occlusion (before the viewmodel clears depth)
+    const useAO = !!this.progSSAO;
+    if (useAO) {
+      this.aoTarget.bind();
+      gl.disable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      const ap = this.progSSAO.use();
+      ap.tex('uDepth', st.depth);
+      ap.set('uProj', cam.proj);
+      ap.set('uInvProj', cam.invProj);
+      ap.set('uRadius', 0.55);
+      ap.set('uStrength', 1.4);
+      gl.bindVertexArray(this.emptyVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
     // ----- first-person viewmodel
     if (scene.viewmodel && scene.viewmodel.length) {
       st.bind();
@@ -552,7 +576,9 @@ export class Renderer {
       m4.mul(vmCam.viewProj, vmCam.proj, cam.view);
       p.use();
       this.setLitUniforms(p, scene, { ...cam, viewProj: vmCam.viewProj });
+      p.set('uAlphaOut', 0);
       this.drawItems(p, scene.viewmodel, cam, false);
+      p.set('uAlphaOut', 1);
     }
 
     gl.disable(gl.DEPTH_TEST);
@@ -601,6 +627,9 @@ export class Renderer {
     cp.tex('uScene', st.color);
     cp.tex('uBloom', useBloom ? this.bloomTargets[0].color : this.whiteTex);
     cp.tex('uVolume', useVolume ? this.volumeTarget.color : this.whiteTex);
+    cp.tex('uAO', useAO ? this.aoTarget.color : this.whiteTex);
+    cp.set('uHasAO', useAO ? 1 : 0);
+    cp.set('uAOTexel', [1 / this.aoTarget.width, 1 / this.aoTarget.height]);
     cp.set('uHasBloom', useBloom ? 1 : 0);
     cp.set('uHasVolume', useVolume ? 1 : 0);
     cp.set('uBloomStrength', 0.09);

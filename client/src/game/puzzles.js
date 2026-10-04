@@ -15,7 +15,7 @@ export class Puzzles {
     this.def = def;
     this.rnd = mulberry32(seed ^ 0xabcdef);
     this.objectives = def.objectives;
-    this.state = { obj: {}, team: { fuse: 0, key: 0, gas: 0, keycard: 0 } };
+    this.state = { obj: {}, team: { fuse: 0, key: 0, gas: 0, keycard: 0, tape: 0 } };
     this.items = []; // draw items
     this.interactables = [];
     this.visual = {};
@@ -42,6 +42,7 @@ export class Puzzles {
       switch (o.type) {
         case 'collect': {
           st.delivered = 0;
+          if (o.revealsCode) st.code = this.randomCode();
           const spawns = this.rnd.shuffle(anchors(o.spawn));
           const n = o.late ? o.count - 1 : o.count;
           for (let i = 0; i < n && i < spawns.length; i++) this.game.items.addPickup(o.item, this.game.items.jitter(spawns[i].pos));
@@ -582,7 +583,7 @@ export class Puzzles {
       let text = t(o.text, { n: st.delivered ?? 0, m: o.count ?? 0 });
       if (o.type === 'valves') text = t(o.text, { n: st.valves.filter(Boolean).length, m: st.valves.length });
       if (o.type === 'generator' && !st.done) text += ` — ${Math.floor(st.progress * 100)}%`;
-      if (o.type === 'radio' && st.done) text += ` → ${t('keypad_title')}: ${st.code}`;
+      if ((o.type === 'radio' || o.revealsCode) && st.done) text += ` → ${t('keypad_title')}: ${st.code}`;
       if (o.type === 'collect' && o.deliver && !st.done) {
         const have = this.state.team[o.item] || 0;
         if (have) text += ` (+${have})`;

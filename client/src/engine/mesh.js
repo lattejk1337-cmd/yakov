@@ -1,8 +1,8 @@
-// Geometry building. Vertex layout (14 floats):
-// pos(3) normal(3) tangent(3) uv(2) attr(3: materialLayer, ambientOcclusion, skyExposure)
+// Geometry building. Vertex layout (17 floats):
+// pos(3) normal(3) tangent(3) uv(2) attr(3: materialLayer, ambientOcclusion, skyExposure) color(3)
 import { MAT_INFO } from './textures.js';
 
-export const FLOATS_PER_VERTEX = 14;
+export const FLOATS_PER_VERTEX = 17;
 const STRIDE = FLOATS_PER_VERTEX * 4;
 
 export class Mesh {
@@ -29,6 +29,7 @@ export class Mesh {
     attr(2, 3, 6);
     attr(3, 2, 9);
     attr(4, 3, 11);
+    attr(5, 3, 14);
     gl.bindVertexArray(null);
   }
   draw() {
@@ -63,6 +64,12 @@ export class MeshBuilder {
     this.i = [];
     this.min = [Infinity, Infinity, Infinity];
     this.max = [-Infinity, -Infinity, -Infinity];
+    this.col = [1, 1, 1];
+  }
+  // current vertex colour (multiplies the material albedo)
+  color(c) {
+    this.col = c ? [c[0], c[1], c[2]] : [1, 1, 1];
+    return this;
   }
   get vertexCount() {
     return this.vc;
@@ -85,6 +92,7 @@ export class MeshBuilder {
     a[o + 6] = t[0]; a[o + 7] = t[1]; a[o + 8] = t[2];
     a[o + 9] = u; a[o + 10] = v;
     a[o + 11] = mat; a[o + 12] = ao; a[o + 13] = sky;
+    a[o + 14] = this.col[0]; a[o + 15] = this.col[1]; a[o + 16] = this.col[2];
     for (let k = 0; k < 3; k++) {
       if (p[k] < this.min[k]) this.min[k] = p[k];
       if (p[k] > this.max[k]) this.max[k] = p[k];
@@ -102,6 +110,8 @@ export class MeshBuilder {
   }
   // Axis aligned box. opts: faces (mask), uv: 'world' | 'local', tile, aoFn(p, n), sky (number or fn(p,n)), uvOffset
   box(min, max, mat, opts = {}) {
+    const prevCol = this.col;
+    if (opts.color) this.col = opts.color;
     const mask = opts.faces ?? FACE.ALL;
     const tile = opts.tile ?? MAT_INFO[mat]?.tile ?? 2;
     const world = (opts.uv ?? 'world') === 'world';
@@ -135,13 +145,31 @@ export class MeshBuilder {
       }
       this.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
+    this.col = prevCol;
   }
-  // Append another builder transformed by a 4x4 matrix (rotation+translation, uniform scale)
-  append(other, m = null) {
+  // Append another builder transformed by a 4x4 matrix (any affine transform). Colours are
+  // multiplied by the builder's current colour so prefabs can be tinted.
+  append(other, m = null, opts = {}) {
     const base = this.vc;
     this.ensure(other.vc);
     const p = [0, 0, 0], n = [0, 0, 0], t = [0, 0, 0];
     const s = other.v;
+    let nm = null;
+    if (m) {
+      // inverse-transpose of the upper 3x3 for normals
+      const a00 = m[0], a01 = m[1], a02 = m[2], a10 = m[4], a11 = m[5], a12 = m[6], a20 = m[8], a21 = m[9], a22 = m[10];
+      const b01 = a22 * a11 - a12 * a21, b11 = -a22 * a10 + a12 * a20, b21 = a21 * a10 - a11 * a20;
+      const det = a00 * b01 + a01 * b11 + a02 * b21 || 1;
+      const id = 1 / det;
+      nm = [
+        b01 * id, b11 * id, b21 * id,
+        (-a22 * a01 + a02 * a21) * id, (a22 * a00 - a02 * a20) * id, (-a21 * a00 + a01 * a20) * id,
+        (a12 * a01 - a02 * a11) * id, (-a12 * a00 + a02 * a10) * id, (a11 * a00 - a01 * a10) * id,
+      ];
+    }
+    const prev = this.col;
+    const tint = this.col;
+    const mat = opts.mat ?? null, sky = opts.sky ?? null;
     for (let k = 0; k < other.vc; k++) {
       const o = k * FLOATS_PER_VERTEX;
       if (m) {
@@ -150,9 +178,9 @@ export class MeshBuilder {
         p[1] = m[1] * x + m[5] * y + m[9] * z + m[13];
         p[2] = m[2] * x + m[6] * y + m[10] * z + m[14];
         const nx = s[o + 3], ny = s[o + 4], nz = s[o + 5];
-        n[0] = m[0] * nx + m[4] * ny + m[8] * nz;
-        n[1] = m[1] * nx + m[5] * ny + m[9] * nz;
-        n[2] = m[2] * nx + m[6] * ny + m[10] * nz;
+        n[0] = nm[0] * nx + nm[1] * ny + nm[2] * nz;
+        n[1] = nm[3] * nx + nm[4] * ny + nm[5] * nz;
+        n[2] = nm[6] * nx + nm[7] * ny + nm[8] * nz;
         const nl = Math.hypot(n[0], n[1], n[2]) || 1;
         n[0] /= nl; n[1] /= nl; n[2] /= nl;
         const tx = s[o + 6], ty = s[o + 7], tz = s[o + 8];
@@ -166,18 +194,30 @@ export class MeshBuilder {
         n[0] = s[o + 3]; n[1] = s[o + 4]; n[2] = s[o + 5];
         t[0] = s[o + 6]; t[1] = s[o + 7]; t[2] = s[o + 8];
       }
-      this.vertex(p, n, t, s[o + 9], s[o + 10], s[o + 11], s[o + 12], s[o + 13]);
+      this.col = [s[o + 14] * tint[0], s[o + 15] * tint[1], s[o + 16] * tint[2]];
+      this.vertex(p, n, t, s[o + 9], s[o + 10], mat ?? s[o + 11], s[o + 12], sky ?? s[o + 13]);
     }
+    this.col = prev;
     for (const idx of other.i) this.i.push(idx + base);
+    return this;
   }
   // Overwrite material/sky of all vertices (useful for prefab reuse)
-  setAttr(mat = null, sky = null) {
+  setAttr(mat = null, sky = null, color = null) {
     for (let k = 0; k < this.vc; k++) {
       const o = k * FLOATS_PER_VERTEX;
       if (mat !== null) this.v[o + 11] = mat;
       if (sky !== null) this.v[o + 13] = sky;
+      if (color) {
+        this.v[o + 14] = color[0];
+        this.v[o + 15] = color[1];
+        this.v[o + 16] = color[2];
+      }
     }
     return this;
+  }
+  // set the sky channel of vertices from `start` (used to store lamp indices)
+  setSkyFrom(start, value) {
+    for (let k = start; k < this.vc; k++) this.v[k * FLOATS_PER_VERTEX + 13] = value;
   }
   build(gl) {
     if (!this.vc) return null;
@@ -248,6 +288,52 @@ export function sphereBuilder(mat = 0, seg = 12, rings = 8) {
   return b;
 }
 
+// Capsule along Y: radius r, total height h, centred at origin
+export function capsuleBuilder(mat = 0, r = 0.5, h = 2, seg = 12, rings = 6) {
+  const b = new MeshBuilder((seg + 1) * (rings * 2 + 2));
+  const half = Math.max(0, h / 2 - r);
+  const rows = [];
+  for (let i = 0; i <= rings; i++) rows.push({ phi: (i / rings) * (Math.PI / 2), y: -half });
+  for (let i = 0; i <= rings; i++) rows.push({ phi: Math.PI / 2 + (i / rings) * (Math.PI / 2), y: half });
+  rows.forEach((row, ri) => {
+    const sy = -Math.cos(row.phi), rr = Math.sin(row.phi);
+    for (let s2 = 0; s2 <= seg; s2++) {
+      const th = (s2 / seg) * Math.PI * 2;
+      const nx = Math.cos(th) * rr, nz = Math.sin(th) * rr;
+      b.vertex([nx * r, row.y + sy * r, nz * r], norm3([nx, sy, nz]), [Math.sin(th), 0, -Math.cos(th)], 1 - s2 / seg, ri / (rows.length - 1), mat);
+    }
+  });
+  for (let r2 = 0; r2 < rows.length - 1; r2++) {
+    for (let s2 = 0; s2 < seg; s2++) {
+      const a = r2 * (seg + 1) + s2, c = a + seg + 1;
+      b.i.push(a, c + 1, a + 1, a, c, c + 1);
+    }
+  }
+  return b;
+}
+
+// Torus in the XZ plane (ring radius R, tube radius r)
+export function torusBuilder(mat = 0, R = 0.4, r = 0.1, seg = 16, side = 8) {
+  const b = new MeshBuilder((seg + 1) * (side + 1));
+  for (let i = 0; i <= seg; i++) {
+    const u = (i / seg) * Math.PI * 2;
+    const cu = Math.cos(u), su = Math.sin(u);
+    for (let j = 0; j <= side; j++) {
+      const v = (j / side) * Math.PI * 2;
+      const cv = Math.cos(v), sv = Math.sin(v);
+      const n = [cu * cv, sv, su * cv];
+      b.vertex([cu * (R + r * cv), r * sv, su * (R + r * cv)], n, [-su, 0, cu], i / seg, j / side, mat);
+    }
+  }
+  for (let i = 0; i < seg; i++) {
+    for (let j = 0; j < side; j++) {
+      const a = i * (side + 1) + j, c = a + side + 1;
+      b.i.push(a, a + 1, c + 1, a, c + 1, c);
+    }
+  }
+  return b;
+}
+
 function norm3(v) {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
   return [v[0] / l, v[1] / l, v[2] / l];
@@ -261,6 +347,7 @@ export function createPrimitives(gl) {
     cone: cylinderBuilder(0, 12, true, 0.0, 0.5).build(gl),
     sphere: sphereBuilder(0, 14, 10).build(gl),
     lowSphere: sphereBuilder(0, 8, 6).build(gl),
+    capsule: capsuleBuilder(0, 0.5, 2, 12, 5).build(gl),
     quad: (() => {
       const b = new MeshBuilder(4);
       b.quad([[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]], [0, 0, 1], [1, 0, 0], [[0, 0], [1, 0], [1, 1], [0, 1]], 0);

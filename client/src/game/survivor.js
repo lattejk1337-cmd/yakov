@@ -78,6 +78,7 @@ export class Survivor {
       rv: this.reviving,
       b: Math.round(this.bleed),
       it: this.inv.held ? 1 : 0,
+      hr: Math.round((this.heart || 0) * 100) / 100,
     };
   }
 
@@ -99,6 +100,7 @@ export class Survivor {
     this.repairing = s.rp ?? null;
     this.reviving = s.rv ?? null;
     this.bleed = s.b ?? this.bleed;
+    this.heart = s.hr ?? 0;
     if (!this.net.has) {
       v3.copy(this.pos, s.p);
       this.yaw = s.y;
@@ -132,7 +134,7 @@ export class Survivor {
     // flashlight from the hand
     if (c.visible && this.flashOn) {
       c.flashTransform(this.flash.pos, this.flash.dir);
-      this.flash.intensity = 2.2 * this.flickerMul();
+      this.flash.intensity = 2.8 * this.flickerMul();
     } else this.flash.intensity = 0;
   }
 
