@@ -1,0 +1,14 @@
+{
+  "name": "dead-hour",
+  "version": "1.0.0",
+  "description": "Dead Hour — co-op online horror for Yandex Games on a custom WebGL2 engine",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js",
+    "build": "node tools/build.mjs",
+    "test": "node tests/server.test.mjs && node tests/maps.test.mjs",
+    "test:smoke": "node tests/smoke.mjs"
+  },
+  "engines": { "node": ">=18" }
+}
