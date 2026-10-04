@@ -1,0 +1,61 @@
+export type ErrorCode =
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'USER_BLOCKED'
+  | 'VALIDATION_ERROR'
+  | 'NOT_FOUND'
+  | 'UNKNOWN_ASSET'
+  | 'INVALID_AMOUNT'
+  | 'AMOUNT_TOO_SMALL'
+  | 'AMOUNT_TOO_LARGE'
+  | 'INSUFFICIENT_FUNDS'
+  | 'DAILY_LIMIT_EXCEEDED'
+  | 'TOO_MANY_PENDING'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'PIN_REQUIRED'
+  | 'PIN_NOT_SET'
+  | 'PIN_ALREADY_SET'
+  | 'PIN_INVALID'
+  | 'PIN_TOO_WEAK'
+  | 'PIN_LOCKED'
+  | 'PROVIDER_ERROR'
+  | 'RATE_LIMITED'
+  | 'INTERNAL';
+
+const STATUS: Record<ErrorCode, number> = {
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  USER_BLOCKED: 403,
+  VALIDATION_ERROR: 400,
+  NOT_FOUND: 404,
+  UNKNOWN_ASSET: 400,
+  INVALID_AMOUNT: 400,
+  AMOUNT_TOO_SMALL: 400,
+  AMOUNT_TOO_LARGE: 400,
+  INSUFFICIENT_FUNDS: 400,
+  DAILY_LIMIT_EXCEEDED: 400,
+  TOO_MANY_PENDING: 429,
+  IDEMPOTENCY_CONFLICT: 409,
+  PIN_REQUIRED: 400,
+  PIN_NOT_SET: 400,
+  PIN_ALREADY_SET: 409,
+  PIN_INVALID: 403,
+  PIN_TOO_WEAK: 400,
+  PIN_LOCKED: 423,
+  PROVIDER_ERROR: 502,
+  RATE_LIMITED: 429,
+  INTERNAL: 500,
+};
+
+export class AppError extends Error {
+  readonly statusCode: number;
+
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.statusCode = STATUS[code];
+  }
+}
