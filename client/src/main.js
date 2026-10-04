@@ -63,6 +63,7 @@ class App {
     this.audio = new AudioEngine();
     await this.audio.generate((p) => this.ui.showLoading(0.63 + p * 0.3, t('loading_snd')));
     this.input = new Input(this.canvas, document.getElementById('touch'));
+    document.body.classList.toggle('touch', this.input.isTouch);
     this.input.onPauseRequest = () => {
       if (this.state === 'match' && !this.paused && !this.ui.isModalOpen && !this.input.usingTouch) this.pauseMatch();
     };
@@ -181,7 +182,7 @@ class App {
     this.dynT = 0;
     const cur = this.renderer.dynScale ?? this.baseScale;
     let next = cur;
-    if (this.fpsAvg < 45) next = Math.max(this.baseScale * 0.5, cur - 0.06);
+    if (this.fpsAvg < 45) next = Math.max(Math.max(0.45, this.baseScale * 0.6), cur - 0.06);
     else if (this.fpsAvg > 57) next = Math.min(this.baseScale, cur + 0.04);
     if (Math.abs(next - cur) > 0.001) this.renderer.setDynamicScale(+next.toFixed(2));
   }

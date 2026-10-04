@@ -8,7 +8,11 @@
     "start": "node server/server.js",
     "build": "node tools/build.mjs",
     "test": "node tests/server.test.mjs && node tests/maps.test.mjs",
-    "test:smoke": "node tests/smoke.mjs"
+    "test:smoke": "node tests/smoke.mjs",
+    "test:e2e": "node tests/smoke.mjs && node tests/gameplay.mjs && node tests/multiplayer.mjs",
+    "lint": "eslint client server tools tests"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

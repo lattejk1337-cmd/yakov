@@ -22,6 +22,8 @@ page.on('console', (m) => { if (m.type() === 'error' && !/sdk\.js|404|Failed to 
 page.on('pageerror', (e) => errors.push(String(e.stack || e)));
 await page.goto(`http://127.0.0.1:${port}/`);
 await page.waitForFunction(() => window.__app && window.__app.state === 'menu', null, { timeout: 120000 });
+// software rendering in CI is slow: use the medium preset for the run
+await page.evaluate(() => { const a = window.__app; a.profile.data.settings.quality = 'medium'; a.profile.data.settings.volumetric = false; a.applySettings(true); });
 await page.mouse.click(640, 360);
 await page.waitForTimeout(1500);
 await page.screenshot({ path: path.join(outDir, 'menu.png') });
@@ -34,7 +36,7 @@ for (const map of maps) {
   await page.evaluate(() => { const a = window.__app; a.input.enabled = true; a.input.downSet.add('up'); });
   await page.waitForTimeout(1200);
   await page.evaluate(() => { const a = window.__app; a.input.downSet.delete('up'); });
-  await page.screenshot({ path: path.join(outDir, `match-${map}.png`) });
+  await page.screenshot({ path: path.join(outDir, `match-${map}.png`), timeout: 90000 });
   const info = await page.evaluate(() => {
     const m = window.__app.match;
     return { draws: window.__app.renderer.stats.draws, fps: Math.round(window.__app.fpsAvg), pos: m.local.pos.map((v) => +v.toFixed(2)), objectives: m.puzzles.hudLines().map((l) => l.text), monster: m.monster.state, lamps: m.world.lamps.length, doors: m.world.doors.length, items: m.items.pickups.length };

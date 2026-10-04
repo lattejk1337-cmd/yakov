@@ -2,7 +2,7 @@
 import { h, clear } from './dom.js';
 import { t, getLang } from '../game/i18n.js';
 import { MAP_IDS, MODES } from '../game/config.js';
-import { ITEMS, SLOTS, SKIN_TONES, HAIR_COLORS, PERKS, ITEM_BY_ID, randomName } from '../game/catalog.js';
+import { ITEMS, SKIN_TONES, HAIR_COLORS, PERKS, randomName } from '../game/catalog.js';
 import { MAPS } from '../game/maps/index.js';
 import { QUALITY_PRESETS } from '../engine/renderer.js';
 
