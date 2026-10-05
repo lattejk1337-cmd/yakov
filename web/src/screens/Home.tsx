@@ -31,10 +31,13 @@ export function Home({
   const asset = me.assets.find((a) => a.code === selected) ?? me.assets[0]!;
   const name = me.user.firstName || me.user.username || '';
 
-  // Total in the display currency: market-rate estimate, display only.
+  // Total in the display currency: market-rate estimate, display only. Empty accounts never
+  // need a rate; a non-empty one without a rate makes the total unknown rather than wrong.
   let total: number | null = 0;
   for (const a of me.assets) {
-    const v = approx(me.balances[a.code] ?? '0', a.code, displayCurrency, me.prices);
+    const bal = me.balances[a.code] ?? '0';
+    if (Number(bal) === 0) continue;
+    const v = a.code === displayCurrency ? Number(bal) : approx(bal, a.code, displayCurrency, me.prices);
     if (v === null) {
       total = null;
       break;

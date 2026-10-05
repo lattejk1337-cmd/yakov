@@ -23,8 +23,10 @@ export class TokenSigner {
     if (typeof token !== 'string' || token.length > 2048) return null;
     const [body, mac] = token.split('.');
     if (!body || !mac) return null;
-    const expected = createHmac('sha256', this.key(purpose)).update(body).digest();
-    const actual = Buffer.from(mac, 'base64url');
+    // Compare the canonical text form: base64 has several spellings of the same bytes
+    // (spare bits in the last character), and only the one we issued is accepted.
+    const expected = Buffer.from(createHmac('sha256', this.key(purpose)).update(body).digest('base64url'));
+    const actual = Buffer.from(mac);
     if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
     try {
       const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as T & { exp: number };

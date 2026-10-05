@@ -8,7 +8,7 @@ import { useToast } from '../components/Toast';
 import { ApiError, api, type Me, newIdempotencyKey, type Quote } from '../lib/api';
 import { symbolOf } from '../lib/currencies';
 import { money } from '../lib/format';
-import { applyKey, formatNumber, fromUnits, normalize, toUnits } from '../lib/money';
+import { applyKey, floorTo, formatNumber, fromUnits, normalize, toUnits } from '../lib/money';
 import { useRefreshWallet } from '../lib/queries';
 import { telegram } from '../lib/telegram';
 
@@ -93,6 +93,12 @@ export function ExchangeScreen({ me, initialFrom, onCurrency }: { me: Me; initia
 
   const execute = async () => {
     if (!q.quote) return;
+    // The app may have slept in the background past the quote's lifetime: re-quote first.
+    if (Date.parse(q.quote.expiresAt) - Date.now() < 1500) {
+      setRefreshTick((n) => n + 1);
+      toast('Курс обновился — проверьте сумму');
+      return;
+    }
     setBusy(true);
     const token = q.quote.quoteToken;
     const key = keyFor.current.get(token) ?? newIdempotencyKey();
@@ -146,7 +152,13 @@ export function ExchangeScreen({ me, initialFrom, onCurrency }: { me: Me; initia
         <div className="fx__panel glass">
           <div className="fx__row">
             <span className="caption">Отдаю</span>
-            <button className="link-btn" onClick={() => setAmount(fromUnits(toUnits(balance, fromAsset.decimals), fromAsset.decimals))}>
+            <button
+              className="link-btn"
+              onClick={() =>
+                // Whole balance, rounded down to what can be typed (crypto may carry more decimals).
+                setAmount(fromUnits(floorTo(toUnits(balance, fromAsset.decimals), fromAsset.decimals, fromAsset.inputDecimals), fromAsset.decimals))
+              }
+            >
               Баланс: {money(balance, from, fromAsset)}
             </button>
           </div>

@@ -16,10 +16,11 @@ export function createBot(config: Config, log: Logger): Bot {
   bot.command('start', async (ctx) => {
     await ctx.reply(
       [
-        `<b>${APP_NAME}</b> — пополняйте и выводите криптовалюту прямо в Telegram.`,
+        `<b>${APP_NAME}</b> — кошелёк в рублях, долларах, евро, юанях и TON прямо в Telegram.`,
         '',
-        '• Пополнение через @CryptoBot за пару касаний',
-        '• Вывод защищён PIN-кодом',
+        '• Пополнение и вывод через @CryptoBot',
+        '• Обмен валют по рыночному курсу',
+        '• Вход и выводы защищены код-паролем',
         '• Уведомления о каждой операции',
       ].join('\n'),
       { parse_mode: 'HTML', reply_markup: openButton() },

@@ -149,5 +149,9 @@ describe('fixed-point rates', () => {
     expect(new TokenSigner('other').verify('session', t)).toBeNull();
     expect(s.verify('session', s.sign('session', { u: 1 }, -1))).toBeNull();
     expect(s.verify('session', 'garbage')).toBeNull();
+    // Flipping a spare bit of the last base64 character keeps the bytes but must not be accepted.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const sibling = t.slice(0, -1) + alphabet[alphabet.indexOf(t.at(-1)!) ^ 1];
+    expect(s.verify('session', sibling)).toBeNull();
   });
 });

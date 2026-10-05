@@ -40,6 +40,9 @@
   --orange: #ff9f0a;
   --aurora-opacity: 0.85;
   --backdrop: rgba(0, 0, 0, 0.45);
+  --sheet-bg: rgba(10, 11, 18, 0.86);
+  --accent-soft: rgba(10, 132, 255, 0.22);
+  --accent-mid: rgba(10, 132, 255, 0.45);
 }
 
 [data-theme='light'] {
@@ -63,6 +66,9 @@
   --orange: #f08c00;
   --aurora-opacity: 0.55;
   --backdrop: rgba(30, 30, 60, 0.18);
+  --sheet-bg: rgba(240, 243, 250, 0.9);
+  --accent-soft: rgba(0, 122, 255, 0.14);
+  --accent-mid: rgba(0, 122, 255, 0.32);
 }
 
 /* ─────────────────────────────── base ─────────────────────────────── */
@@ -152,21 +158,24 @@ p {
 .aurora__blob--1 {
   top: -45vmax;
   left: -30vmax;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--a1) 75%, transparent), transparent);
+  background: radial-gradient(closest-side, var(--a1), transparent);
+  opacity: 0.75;
   animation: drift1 26s ease-in-out infinite alternate;
 }
 
 .aurora__blob--2 {
   top: 10vmax;
   right: -45vmax;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--a2) 65%, transparent), transparent);
+  background: radial-gradient(closest-side, var(--a2), transparent);
+  opacity: 0.65;
   animation: drift2 32s ease-in-out infinite alternate;
 }
 
 .aurora__blob--3 {
   bottom: -55vmax;
   left: -10vmax;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--a3) 55%, transparent), transparent);
+  background: radial-gradient(closest-side, var(--a3), transparent);
+  opacity: 0.55;
   animation: drift3 38s ease-in-out infinite alternate;
 }
 
@@ -379,7 +388,7 @@ p {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
     inset 0 -2px 6px rgba(0, 0, 0, 0.15),
-    0 4px 12px -4px color-mix(in srgb, var(--c1) 70%, transparent);
+    0 4px 12px -6px var(--c1);
 }
 
 /* ─────────────────────────────── home ─────────────────────────────── */
@@ -454,8 +463,10 @@ p {
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scroll-padding-inline: var(--gutter);
-  margin: 0 calc(var(--gutter) * -1);
-  padding: 4px var(--gutter) 10px;
+  /* A scroller clips everything outside its box, shadows included: leave them room
+     (padding) and take the space back (negative margin) so the layout doesn't shift. */
+  margin: -12px calc(var(--gutter) * -1) -22px;
+  padding: 12px var(--gutter) 30px;
   scrollbar-width: none;
 }
 
@@ -465,6 +476,10 @@ p {
 
 .card {
   flex: 0 0 148px;
+  box-shadow:
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 -1px 0 var(--glass-lo),
+    0 10px 22px -16px rgba(0, 0, 0, 0.6);
   scroll-snap-align: start;
   height: 132px;
   padding: 14px;
@@ -486,23 +501,22 @@ p {
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--c1) 70%, transparent), transparent);
-  opacity: 0.35;
+  background: radial-gradient(closest-side, var(--c1), transparent);
+  opacity: 0.25;
   transition: opacity 0.4s;
   z-index: -1;
 }
 
 .card.is-selected {
-  border-color: color-mix(in srgb, var(--c1) 70%, white);
+  border-color: var(--c1);
   box-shadow:
     inset 0 1px 0 var(--glass-hi),
-    0 0 0 1px color-mix(in srgb, var(--c1) 60%, transparent),
-    0 14px 34px -12px color-mix(in srgb, var(--c1) 80%, transparent);
+    0 10px 22px -14px var(--c1);
   transform: translateY(-3px);
 }
 
 .card.is-selected .card__glow {
-  opacity: 0.85;
+  opacity: 0.6;
 }
 
 .card__top {
@@ -832,7 +846,7 @@ p {
   left: 6px;
   width: calc((100% - 12px) / 4);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 18%, var(--glass-press));
+  background: var(--accent-soft);
   box-shadow:
     inset 0 1px 0 var(--glass-hi),
     0 4px 14px -6px rgba(0, 0, 0, 0.35);
@@ -894,7 +908,7 @@ p {
   max-width: 560px;
   margin: 0 auto;
   border-radius: 30px 30px 0 0;
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  background: var(--sheet-bg);
   -webkit-backdrop-filter: blur(50px) saturate(180%);
   backdrop-filter: blur(50px) saturate(180%);
   border: 1px solid var(--glass-border);
@@ -1028,8 +1042,12 @@ p {
   gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
-  margin: 0 calc(var(--gutter) * -1);
-  padding: 2px var(--gutter) 6px;
+  margin: -8px calc(var(--gutter) * -1) -14px;
+  padding: 8px var(--gutter) 18px;
+}
+
+.strip__chip {
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 6px 14px -10px rgba(0, 0, 0, 0.5);
 }
 
 .strip::-webkit-scrollbar {
@@ -1049,7 +1067,7 @@ p {
 
 .strip__chip.is-active {
   background: var(--glass-press);
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--glass-border));
+  border-color: var(--accent-mid);
 }
 
 .amount-field {
@@ -1430,8 +1448,13 @@ p {
   display: grid;
   place-items: center;
   margin: -22px 0 0 -22px;
-  background: var(--glass-press);
-  color: var(--accent);
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 0 4px var(--bg),
+    0 8px 18px -6px var(--accent);
 }
 
 .fx__swap svg {
@@ -1535,7 +1558,7 @@ p {
 }
 
 .picker__row.is-selected {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--accent-soft);
 }
 
 .picker__name {
@@ -1638,7 +1661,7 @@ p {
   inset: 4px auto 4px 4px;
   width: calc(56px + var(--x));
   border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 20%, transparent), color-mix(in srgb, var(--accent) 45%, transparent));
+  background: linear-gradient(90deg, var(--accent-soft), var(--accent-mid));
 }
 
 .slider__label {
@@ -1714,7 +1737,8 @@ p {
 }
 
 .success__circle {
-  fill: color-mix(in srgb, var(--tone) 18%, transparent);
+  fill: var(--tone);
+  fill-opacity: 0.16;
   stroke: var(--tone);
   stroke-width: 2.5;
 }

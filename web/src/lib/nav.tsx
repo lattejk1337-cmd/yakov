@@ -67,10 +67,11 @@ export function NavProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const hasOverlay = overlays.some((o) => !o.closing);
+  // Telegram's Back closes the top sheet, otherwise returns from another tab to Home.
   useEffect(() => {
-    if (!hasOverlay) return;
-    return telegram.backButton.show(close);
-  }, [hasOverlay, close]);
+    if (hasOverlay) return telegram.backButton.show(close);
+    if (tab !== 'home') return telegram.backButton.show(() => setTabState('home'));
+  }, [hasOverlay, close, tab]);
 
   const value = useMemo<Nav>(
     () => ({ tab, setTab, overlays, open, replace, close, closeAll }),

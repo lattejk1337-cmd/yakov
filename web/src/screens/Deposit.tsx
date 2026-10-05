@@ -110,11 +110,12 @@ export function AwaitPayment({ deposit, me, onPaid }: { deposit: Deposit; me: Me
   });
   const status = q.data.status;
 
+  const { refetch } = q;
   useEffect(() => {
-    const onVisible = () => document.visibilityState === 'visible' && void q.refetch();
+    const onVisible = () => document.visibilityState === 'visible' && void refetch();
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [q]);
+  }, [refetch]);
 
   useEffect(() => {
     if (status === 'paid') {

@@ -480,7 +480,15 @@ describe('lock screen', () => {
     const as = (session: string) =>
       app.inject({ method: 'GET', url: '/api/me', headers: { ...tgHeaders(ALICE), 'x-wallet-session': session } });
     expect((await as(sessionFor(BOB))).json().error.code).toBe('LOCKED');
-    expect((await as(sessionFor(ALICE).replace(/.$/, 'x'))).json().error.code).toBe('LOCKED');
+    const real = sessionFor(ALICE);
+    const flip = (c: string) => (c === 'A' ? 'B' : 'A');
+    const forged = real.slice(0, -5) + flip(real.at(-5)!) + real.slice(-4); // a full-6-bit character of the MAC
+    expect((await as(forged)).json().error.code).toBe('LOCKED');
+    // A non-canonical spelling of the very same MAC bytes is refused as well.
+    const last = real.at(-1)!;
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const sibling = alphabet[alphabet.indexOf(last) ^ 1]!;
+    expect((await as(real.slice(0, -1) + sibling)).json().error.code).toBe('LOCKED');
     expect((await as(testSigner.sign('session', { u: ALICE }, -1))).json().error.code).toBe('LOCKED');
     // A token signed for another purpose (an exchange quote) is not a session.
     expect((await as(testSigner.sign('quote', { u: ALICE }, 600))).json().error.code).toBe('LOCKED');
