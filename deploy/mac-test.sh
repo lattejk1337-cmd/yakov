@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Tonum Wallet — test run on your own Mac (no server or domain needed).
 #   bash deploy/mac-test.sh
-# Starts PostgreSQL and the app in Docker Desktop and opens a free Cloudflare quick tunnel
-# (https://….trycloudflare.com), so Telegram can open the Mini App from your phone.
-# The tunnel address changes on every start; the bot picks up the new one automatically.
+# Starts PostgreSQL and the app in Docker Desktop and opens a free public HTTPS tunnel, so
+# Telegram can open the Mini App from your phone. Tunnels are tried in order until one works:
+# Cloudflare (needs port 7844, often blocked), then localhost.run and Pinggy over SSH, which is
+# built into macOS. The address changes from run to run; the bot picks up the new one itself.
+# Testing only: a tunnel provider can see the traffic, so never use it with real money.
 # Keep the Terminal window open while testing; press Ctrl+C to stop.
 set -euo pipefail
 
@@ -57,72 +59,126 @@ fi
 ok "Ключи на месте (сохраняются в файле .env — повторно вводить не нужно)"
 
 bold "3/4  Туннель в интернет"
+mkdir -p .bin
 cf="$(command -v cloudflared || true)"
 if [ -z "$cf" ]; then
   cf=.bin/cloudflared
   if [ ! -x "$cf" ]; then
     case "$(uname -m)" in arm64 | aarch64) arch=arm64 ;; *) arch=amd64 ;; esac
     base=https://github.com/cloudflare/cloudflared/releases/latest/download
-    mkdir -p .bin
     echo "Скачиваем cloudflared (~20 МБ, один раз)…"
     if [ "$(uname -s)" = Darwin ]; then
-      curl -fL --progress-bar -o .bin/cloudflared.tgz "$base/cloudflared-darwin-$arch.tgz"
-      tar -xzf .bin/cloudflared.tgz -C .bin && rm -f .bin/cloudflared.tgz
+      { curl -fL --progress-bar -o .bin/cloudflared.tgz "$base/cloudflared-darwin-$arch.tgz" &&
+        tar -xzf .bin/cloudflared.tgz -C .bin && rm -f .bin/cloudflared.tgz; } || true
     else
-      curl -fL --progress-bar -o "$cf" "$base/cloudflared-linux-$arch"
+      curl -fL --progress-bar -o "$cf" "$base/cloudflared-linux-$arch" || true
     fi
-    chmod +x "$cf"
+    [ -f "$cf" ] && chmod +x "$cf" || warn "cloudflared скачать не удалось — попробуем другие туннели."
   fi
 fi
 
-cf_pid=""
+SSH_OPTS=(-n -o BatchMode=yes -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new
+  -o UserKnownHostsFile=.bin/known_hosts -o ServerAliveInterval=30 -o ServerAliveCountMax=3
+  -o ConnectTimeout=15 -o ExitOnForwardFailure=yes)
+
+tunnel_pid=""
+provider=""
 url=""
 
 cleanup() {
+  local code="${1:-0}"
   trap - INT TERM HUP EXIT
   echo
   echo "Останавливаем…"
-  [ -n "$cf_pid" ] && kill "$cf_pid" 2>/dev/null || true
+  [ -n "$tunnel_pid" ] && kill "$tunnel_pid" 2>/dev/null || true
   "${COMPOSE[@]}" stop >/dev/null 2>&1 || true
   echo "Остановлено. Запустить снова: bash deploy/mac-test.sh"
+  exit "$code"
 }
-trap cleanup INT TERM HUP EXIT
+trap 'cleanup 0' INT TERM HUP
+trap 'cleanup $?' EXIT
 
-# Starts a quick tunnel and waits until Cloudflare has actually connected to it:
-# the public address is handed out before the connection is up.
-start_tunnel() {
-  local proto="$1"
+# Latest public address printed by the running tunnel (some free tunnels rotate it).
+url_from_log() {
+  case "$provider" in
+    cloudflare-*) grep -oE 'https://[-a-z0-9]+\.trycloudflare\.com' .tunnel.log | grep -v '//api\.' | tail -1 ;;
+    localhostrun) grep 'tunneled with tls termination' .tunnel.log | grep -oE 'https://[-a-z0-9.]+' | tail -1 ;;
+    pinggy) grep -oE 'https://[-a-z0-9.]+\.pinggy\.(link|online)' .tunnel.log | tail -1 ;;
+  esac 2>/dev/null || true
+}
+
+launch() {
+  case "$provider" in
+    cloudflare-http2 | cloudflare-quic)
+      [ -x "$cf" ] || return 1
+      "$cf" tunnel --no-autoupdate --protocol "${provider#cloudflare-}" --url http://localhost:3000 ;;
+    localhostrun) ssh "${SSH_OPTS[@]}" -R 80:localhost:3000 nokey@localhost.run ;;
+    pinggy) ssh "${SSH_OPTS[@]}" -p 443 -R 0:localhost:3000 a.pinggy.io ;;
+  esac
+}
+
+# Starts one tunnel and waits until it is really connected (Cloudflare hands out
+# its address before the connection is up).
+try_tunnel() {
+  provider="$1"
+  local timeout=25
+  case "$provider" in cloudflare-*) timeout="${TUNNEL_TIMEOUT:-30}" ;; esac
   rm -f .tunnel.log
-  "$cf" tunnel --no-autoupdate --protocol "$proto" --url http://localhost:3000 >.tunnel.log 2>&1 &
-  cf_pid=$!
-  url=""
-  for _ in $(seq 1 "${TUNNEL_TIMEOUT:-45}"); do
-    [ -n "$url" ] || url="$(grep -oE 'https://[-a-z0-9]+\.trycloudflare\.com' .tunnel.log | grep -v '//api\.' | head -1 || true)"
-    if [ -n "$url" ] && grep -q 'Registered tunnel connection' .tunnel.log; then return 0; fi
-    kill -0 "$cf_pid" 2>/dev/null || return 1
+  launch >.tunnel.log 2>&1 &
+  tunnel_pid=$!
+  for _ in $(seq 1 "$timeout"); do
+    url="$(url_from_log)"
+    if [ -n "$url" ]; then
+      case "$provider" in
+        cloudflare-*) grep -q 'Registered tunnel connection' .tunnel.log && return 0 ;;
+        *) return 0 ;;
+      esac
+    fi
+    kill -0 "$tunnel_pid" 2>/dev/null || break
     sleep 1
+  done
+  kill "$tunnel_pid" 2>/dev/null || true
+  wait "$tunnel_pid" 2>/dev/null || true
+  tunnel_pid=""
+  url=""
+  return 1
+}
+
+PROVIDERS="cloudflare-http2 cloudflare-quic localhostrun pinggy"
+name_of() {
+  case "$1" in
+    cloudflare-http2) echo "Cloudflare" ;; cloudflare-quic) echo "Cloudflare (QUIC)" ;;
+    localhostrun) echo "localhost.run" ;; pinggy) echo "Pinggy" ;;
+  esac
+}
+
+connect_any() {
+  local last order p
+  # Start with whatever worked last time.
+  last="$(cat .bin/tunnel-provider 2>/dev/null || true)"
+  order="$last"
+  for p in $PROVIDERS; do [ "$p" = "$last" ] || order="$order $p"; done
+  for p in $order; do
+    echo "Пробуем туннель: $(name_of "$p")…"
+    if try_tunnel "$p"; then
+      echo "$p" >.bin/tunnel-provider
+      ok "Подключено через $(name_of "$p")"
+      return 0
+    fi
+    warn "$(name_of "$p") не подключился."
   done
   return 1
 }
 
-connected=no
-# http2 runs over ordinary HTTPS (TCP 443) and gets through more networks; QUIC is the fallback.
-for proto in http2 quic; do
-  echo "Подключаемся к Cloudflare (способ: $proto)…"
-  if start_tunnel "$proto"; then connected=yes; break; fi
-  kill "$cf_pid" 2>/dev/null || true
-  wait "$cf_pid" 2>/dev/null || true
-  cf_pid=""
-  warn "Способом $proto подключиться не удалось."
-done
-if [ "$connected" != yes ]; then
-  tail -15 .tunnel.log >&2 || true
-  die "Не удалось подключиться к Cloudflare. Возможно, интернет-провайдер блокирует его. Попробуйте другую сеть (например, раздайте интернет с телефона) и запустите скрипт снова."
-fi
+connect_any || {
+  tail -15 .tunnel.log >&2 2>/dev/null || true
+  die "Ни один туннель не подключился. Проверьте интернет; если включён VPN — попробуйте с ним и без него, затем запустите скрипт снова."
+}
 ok "Адрес: $url"
 
-umask 077
-cat >.env <<ENV
+write_env() {
+  umask 077
+  cat >.env <<ENV
 # Generated by deploy/mac-test.sh for testing on this computer.
 NODE_ENV=production
 TRUST_PROXY=true
@@ -140,24 +196,31 @@ CRYPTOPAY_TOKEN=$cp_token
 CRYPTOPAY_NETWORK=$network
 ASSETS=USDT,TON
 ENV
+}
+
+wait_healthy() {
+  for _ in $(seq 1 "$1"); do
+    curl -fsS --max-time 2 http://localhost:3000/api/health >/dev/null 2>&1 && return 0
+    printf '.'
+    sleep 3
+  done
+  return 1
+}
 
 bold "4/4  Сборка и запуск (первый раз — 3–7 минут)"
+write_env
 "${COMPOSE[@]}" up -d db
 "${COMPOSE[@]}" up -d --build --force-recreate app
-
 printf 'Ждём запуска'
-started=no
-for _ in $(seq 1 100); do
-  if curl -fsS --max-time 2 http://localhost:3000/api/health >/dev/null 2>&1; then started=yes; break; fi
-  printf '.'; sleep 3
-done
-echo
-if [ "$started" != yes ]; then
+if ! wait_healthy 100; then
+  echo
   warn "Приложение не отвечает. Последние строки журнала:"
   "${COMPOSE[@]}" logs --tail 40 app >&2 || true
   exit 1
 fi
+echo
 ok "Приложение запущено"
+active_url="$url"
 
 reachable=no
 for _ in $(seq 1 30); do
@@ -168,7 +231,7 @@ if [ "$reachable" = yes ]; then
   ok "Кошелёк открывается из интернета: $url"
 else
   warn "Приложение запущено, но с этого Mac адрес $url пока не открывается."
-  warn "Иногда новому адресу нужна минута. Если в Telegram будет ошибка 1033 — пришлите снимок этого окна."
+  warn "Попробуйте открыть кошелёк в Telegram. Если не откроется — пришлите снимок этого окна."
 fi
 
 bold "Готово! Можно тестировать в Telegram:"
@@ -185,6 +248,26 @@ cat <<TXT
   Остановить — Ctrl+C. Журнал приложения — в новом окне: docker compose logs -f app
 TXT
 
-# Keep running until the tunnel exits or the user presses Ctrl+C.
-wait "$cf_pid" || true
-warn "Туннель остановился. Запустите скрипт снова: bash deploy/mac-test.sh"
+# Watch the tunnel: reconnect if it drops and hand a changed address to the bot.
+while true; do
+  sleep 5
+  if ! kill -0 "$tunnel_pid" 2>/dev/null; then
+    warn "Туннель отключился — переподключаемся…"
+    connect_any || die "Не удалось переподключить туннель. Запустите скрипт снова."
+  fi
+  latest="$(url_from_log)"
+  [ -n "$latest" ] && url="$latest"
+  if [ "$url" != "$active_url" ]; then
+    echo "Адрес туннеля сменился: $url — обновляем бота…"
+    write_env
+    "${COMPOSE[@]}" up -d --force-recreate app >/dev/null 2>&1 || true
+    if wait_healthy 40; then
+      echo
+      active_url="$url"
+      ok "Готово. В Telegram откройте кошелёк кнопкой «Tonum Wallet» или отправьте /start заново"
+    else
+      echo
+      warn "Приложение не перезапустилось — попробуем ещё раз через несколько секунд"
+    fi
+  fi
+done
