@@ -1,0 +1,6 @@
+# Overlay for testing on your own computer (used by deploy/mac-test.sh):
+# exposes the app on localhost:3000 for the tunnel; the Caddy service is not started.
+services:
+  app:
+    ports:
+      - '127.0.0.1:3000:3000'

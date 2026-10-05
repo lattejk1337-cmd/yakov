@@ -30,6 +30,9 @@ ask() { # ask "Вопрос" regex [secret]
   done
 }
 
+# Values that must survive a reconfiguration: the database volume keeps its first password.
+get_env() { [ -f .env ] && grep -E "^$1=" .env | head -1 | cut -d= -f2- || true; }
+
 bold "1/4  Docker"
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   ok "Docker уже установлен"
@@ -59,6 +62,9 @@ if [ "$write_env" = yes ]; then
   net_choice="$(ask "Crypto Pay: 1 — тестовые деньги (@CryptoTestnetBot), 2 — настоящие (@CryptoBot)" '^[12]$')"
   network=testnet; [ "$net_choice" = 2 ] && network=mainnet
 
+  pg_pass="$(get_env POSTGRES_PASSWORD)"; [ -n "$pg_pass" ] || pg_pass="$(openssl rand -hex 24)"
+  hook_secret="$(get_env TELEGRAM_WEBHOOK_SECRET)"; [ -n "$hook_secret" ] || hook_secret="$(openssl rand -hex 32)"
+
   umask 077
   cat > .env <<ENV
 NODE_ENV=production
@@ -66,11 +72,11 @@ DOMAIN=$domain
 TRUST_PROXY=true
 LOG_LEVEL=info
 
-POSTGRES_PASSWORD=$(openssl rand -hex 24)
+POSTGRES_PASSWORD=$pg_pass
 
 BOT_TOKEN=$bot_token
 BOT_MODE=webhook
-TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 32)
+TELEGRAM_WEBHOOK_SECRET=$hook_secret
 PUBLIC_URL=https://$domain
 WEBAPP_URL=https://$domain
 

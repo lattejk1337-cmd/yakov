@@ -62,6 +62,13 @@ sudo bash deploy/install.sh
 
 Без скрипта: заполните `.env` по образцу `.env.example` и выполните `docker compose up -d --build`.
 
+### Тест на своём Mac (без сервера и домена)
+Нужен только [Docker Desktop](https://www.docker.com/products/docker-desktop/). Запустите его, затем в папке проекта выполните:
+```bash
+bash deploy/mac-test.sh
+```
+Скрипт спросит ключи бота и Crypto Pay (testnet), запустит приложение и откроет бесплатный туннель Cloudflare с адресом `https://….trycloudflare.com`. Бот сам получит этот адрес, после чего Mini App можно открыть с телефона кнопкой в боте. Адрес меняется при каждом запуске. Пока идёт тест, окно Терминала должно оставаться открытым, а Mac — не уходить в сон.
+
 ### 3. Локальная разработка
 ```bash
 npm ci
