@@ -1,6 +1,10 @@
 # Overlay for testing on your own computer (used by deploy/mac-test.sh):
 # exposes the app on localhost:3000 for the tunnel; the Caddy service is not started.
+# No auto-restart: after a reboot the bot must not come back with a dead tunnel address.
 services:
+  db:
+    restart: 'no'
   app:
+    restart: 'no'
     ports:
       - '127.0.0.1:3000:3000'

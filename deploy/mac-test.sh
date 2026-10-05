@@ -48,7 +48,12 @@ fi
 [ -n "$bot_token" ] || bot_token="$(ask "Ключ бота от @BotFather" '^[0-9]+:[A-Za-z0-9_-]{30,}$' secret)"
 [ -n "$cp_token" ] || cp_token="$(ask "Ключ Crypto Pay из @CryptoTestnetBot" '^[0-9]+:[A-Za-z0-9_-]+$' secret)"
 network="$(get_env CRYPTOPAY_NETWORK)"; [ -n "$network" ] || network=testnet
-pg_pass="$(get_env POSTGRES_PASSWORD)"; [ -n "$pg_pass" ] || pg_pass="$(openssl rand -hex 24)"
+pg_pass="$(get_env POSTGRES_PASSWORD)"
+if [ -z "$pg_pass" ]; then
+  pg_pass="$(openssl rand -hex 24)"
+  # A test database left from an earlier run has a password we no longer know: start clean.
+  "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+fi
 ok "Ключи на месте (сохраняются в файле .env — повторно вводить не нужно)"
 
 bold "3/4  Туннель в интернет"
@@ -70,28 +75,50 @@ if [ -z "$cf" ]; then
   fi
 fi
 
-rm -f .tunnel.log
-"$cf" tunnel --no-autoupdate --url http://localhost:3000 >.tunnel.log 2>&1 &
-cf_pid=$!
+cf_pid=""
+url=""
 
 cleanup() {
-  trap - INT TERM EXIT
+  trap - INT TERM HUP EXIT
   echo
   echo "Останавливаем…"
-  kill "$cf_pid" 2>/dev/null || true
+  [ -n "$cf_pid" ] && kill "$cf_pid" 2>/dev/null || true
   "${COMPOSE[@]}" stop >/dev/null 2>&1 || true
   echo "Остановлено. Запустить снова: bash deploy/mac-test.sh"
 }
-trap cleanup INT TERM EXIT
+trap cleanup INT TERM HUP EXIT
 
-url=""
-for _ in $(seq 1 60); do
-  url="$(grep -oE 'https://[-a-z0-9]+\.trycloudflare\.com' .tunnel.log | grep -v '//api\.' | head -1 || true)"
-  [ -n "$url" ] && break
-  kill -0 "$cf_pid" 2>/dev/null || { tail -20 .tunnel.log >&2; die "Туннель не запустился (журнал выше)"; }
-  sleep 1
+# Starts a quick tunnel and waits until Cloudflare has actually connected to it:
+# the public address is handed out before the connection is up.
+start_tunnel() {
+  local proto="$1"
+  rm -f .tunnel.log
+  "$cf" tunnel --no-autoupdate --protocol "$proto" --url http://localhost:3000 >.tunnel.log 2>&1 &
+  cf_pid=$!
+  url=""
+  for _ in $(seq 1 "${TUNNEL_TIMEOUT:-45}"); do
+    [ -n "$url" ] || url="$(grep -oE 'https://[-a-z0-9]+\.trycloudflare\.com' .tunnel.log | grep -v '//api\.' | head -1 || true)"
+    if [ -n "$url" ] && grep -q 'Registered tunnel connection' .tunnel.log; then return 0; fi
+    kill -0 "$cf_pid" 2>/dev/null || return 1
+    sleep 1
+  done
+  return 1
+}
+
+connected=no
+# http2 runs over ordinary HTTPS (TCP 443) and gets through more networks; QUIC is the fallback.
+for proto in http2 quic; do
+  echo "Подключаемся к Cloudflare (способ: $proto)…"
+  if start_tunnel "$proto"; then connected=yes; break; fi
+  kill "$cf_pid" 2>/dev/null || true
+  wait "$cf_pid" 2>/dev/null || true
+  cf_pid=""
+  warn "Способом $proto подключиться не удалось."
 done
-[ -n "$url" ] || { tail -20 .tunnel.log >&2; die "Не удалось получить адрес туннеля. Проверьте интернет и попробуйте снова."; }
+if [ "$connected" != yes ]; then
+  tail -15 .tunnel.log >&2 || true
+  die "Не удалось подключиться к Cloudflare. Возможно, интернет-провайдер блокирует его. Попробуйте другую сеть (например, раздайте интернет с телефона) и запустите скрипт снова."
+fi
 ok "Адрес: $url"
 
 umask 077
@@ -132,10 +159,17 @@ if [ "$started" != yes ]; then
 fi
 ok "Приложение запущено"
 
-for _ in $(seq 1 20); do
-  curl -fsS --max-time 5 "$url/api/health" >/dev/null 2>&1 && break
+reachable=no
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 5 "$url/api/health" >/dev/null 2>&1; then reachable=yes; break; fi
   sleep 2
 done
+if [ "$reachable" = yes ]; then
+  ok "Кошелёк открывается из интернета: $url"
+else
+  warn "Приложение запущено, но с этого Mac адрес $url пока не открывается."
+  warn "Иногда новому адресу нужна минута. Если в Telegram будет ошибка 1033 — пришлите снимок этого окна."
+fi
 
 bold "Готово! Можно тестировать в Telegram:"
 cat <<TXT
