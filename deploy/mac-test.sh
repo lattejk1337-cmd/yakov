@@ -109,7 +109,10 @@ url_from_log() {
   case "$provider" in
     cloudflare-*) grep -oE 'https://[-a-z0-9]+\.trycloudflare\.com' .tunnel.log | grep -v '//api\.' | tail -1 ;;
     localhostrun) grep 'tunneled with tls termination' .tunnel.log | grep -oE 'https://[-a-z0-9.]+' | tail -1 ;;
-    pinggy) grep -oE 'https://[-a-z0-9.]+\.pinggy\.(link|online)' .tunnel.log | tail -1 ;;
+    # Pinggy prints several equivalent addresses (domains vary: pinggy-free.link, pinggy.net, …).
+    # Only a line that is just the tunnel address, e.g. https://elnzt-65-109-214-68.run.pinggy-free.link
+    pinggy) tr -d '\r' <.tunnel.log | grep -oE '^[[:space:]]*https://[a-z0-9]+-[-a-z0-9]+(\.[-a-z0-9]+)*\.pinggy[-a-z0-9]*\.[a-z]+[[:space:]]*$' |
+      sed 's/[[:space:]]//g' | head -1 ;;
   esac 2>/dev/null || true
 }
 
@@ -118,7 +121,7 @@ launch() {
     cloudflare-http2 | cloudflare-quic)
       [ -x "$cf" ] || return 1
       "$cf" tunnel --no-autoupdate --protocol "${provider#cloudflare-}" --url http://localhost:3000 ;;
-    localhostrun) tunnel_ssh -R 80:localhost:3000 nokey@localhost.run ;;
+    localhostrun) tunnel_ssh -T -R 80:localhost:3000 nokey@localhost.run ;;
     pinggy) tunnel_ssh -p 443 -R 0:localhost:3000 free@a.pinggy.io ;;
   esac
 }
