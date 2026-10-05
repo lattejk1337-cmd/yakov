@@ -54,6 +54,9 @@ export function Home() {
 
       <Actions me={data} asset={asset} />
       <Feed assets={data.assets} />
+      <footer className="brand-foot" aria-hidden="true">
+        <span className="brand-foot__mark">T</span> Tonum Wallet
+      </footer>
     </>
   );
 }
@@ -203,7 +206,7 @@ function Feed({ assets }: { assets: AssetInfo[] }) {
             <i />
           </div>
           <div className="label">Пока пусто</div>
-          <div style={{ marginTop: 6 }}>Пополните кошелёк — операции появятся здесь</div>
+          <div style={{ marginTop: 6 }}>Пополните Tonum Wallet — операции появятся здесь</div>
         </div>
       )}
 

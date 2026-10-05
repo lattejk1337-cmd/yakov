@@ -128,7 +128,7 @@ function OpenInTelegram() {
       </div>
       <div className="gate__title">Откройте в Telegram</div>
       <p className="muted" style={{ margin: 0, maxWidth: 300 }}>
-        Кошелёк работает внутри Telegram: так мы надёжно знаем, что это вы, без паролей.
+        Tonum Wallet работает внутри Telegram: так мы надёжно знаем, что это вы, без паролей.
       </p>
       {bot && (
         <a className="btn btn--lime" href={`https://t.me/${bot}`} style={{ textDecoration: 'none' }}>

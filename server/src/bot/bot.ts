@@ -2,15 +2,17 @@ import { Bot, InlineKeyboard } from 'grammy';
 import type { Config } from '../config.js';
 import type { Logger, Notifier } from '../services/wallet.js';
 
+export const APP_NAME = 'Tonum Wallet';
+
 export function createBot(config: Config, log: Logger): Bot {
   const bot = new Bot(config.BOT_TOKEN);
   const openButton = () =>
-    config.WEBAPP_URL ? new InlineKeyboard().webApp('Открыть кошелёк', config.WEBAPP_URL) : undefined;
+    config.WEBAPP_URL ? new InlineKeyboard().webApp(`Открыть ${APP_NAME}`, config.WEBAPP_URL) : undefined;
 
   bot.command('start', async (ctx) => {
     await ctx.reply(
       [
-        '<b>Кошелёк</b> — пополняйте и выводите криптовалюту прямо в Telegram.',
+        `<b>${APP_NAME}</b> — пополняйте и выводите криптовалюту прямо в Telegram.`,
         '',
         '• Пополнение через @CryptoBot за пару касаний',
         '• Вывод защищён PIN-кодом',
@@ -21,7 +23,7 @@ export function createBot(config: Config, log: Logger): Bot {
   });
 
   bot.command('help', (ctx) =>
-    ctx.reply('Откройте кошелёк кнопкой ниже. Если что-то пошло не так — напишите в поддержку.', {
+    ctx.reply(`Откройте ${APP_NAME} кнопкой ниже. Если что-то пошло не так — напишите в поддержку.`, {
       reply_markup: openButton(),
     }),
   );
@@ -34,12 +36,12 @@ export function createBot(config: Config, log: Logger): Bot {
 export async function configureBot(bot: Bot, config: Config, log: Logger): Promise<void> {
   try {
     await bot.api.setMyCommands([
-      { command: 'start', description: 'Открыть кошелёк' },
+      { command: 'start', description: `Открыть ${APP_NAME}` },
       { command: 'help', description: 'Помощь' },
     ]);
     if (config.WEBAPP_URL) {
       await bot.api.setChatMenuButton({
-        menu_button: { type: 'web_app', text: 'Кошелёк', web_app: { url: config.WEBAPP_URL } },
+        menu_button: { type: 'web_app', text: APP_NAME, web_app: { url: config.WEBAPP_URL } },
       });
     }
   } catch (err) {
@@ -55,7 +57,7 @@ export class BotNotifier implements Notifier {
 
   async notify(userId: number, text: string): Promise<void> {
     await this.bot.api.sendMessage(userId, text, {
-      reply_markup: this.webAppUrl ? new InlineKeyboard().webApp('Открыть кошелёк', this.webAppUrl) : undefined,
+      reply_markup: this.webAppUrl ? new InlineKeyboard().webApp(`Открыть ${APP_NAME}`, this.webAppUrl) : undefined,
     });
   }
 }

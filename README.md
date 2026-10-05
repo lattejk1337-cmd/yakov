@@ -1,4 +1,4 @@
-# Кошелёк — Telegram Mini App
+# Tonum Wallet — Telegram Mini App
 
 Криптокошелёк внутри Telegram: пополнение и вывод USDT/TON через [@CryptoBot (Crypto Pay API)](https://help.crypt.bot/crypto-pay-api), история операций, PIN-код на вывод, уведомления в чат.
 
@@ -51,13 +51,16 @@ server/   Node.js + Fastify + PostgreSQL — API, бот (grammY), фоновы�
    - **Webhooks** → `https://<ваш-домен>/api/webhooks/cryptopay`
    - включите **Transfers**: без этого вывод работать не будет
    - пополните баланс приложения — из него идут выплаты пользователям.
-3. Скопируйте `.env.example` в `.env` и заполните.
+3. Ключи понадобятся на шаге 2. Установщик сам запишет их в `.env`.
 
-### 2. Продакшен (Docker)
+### 2. Продакшен (сервер с Ubuntu)
+Нужен VPS с Ubuntu 22.04/24.04 и 2 ГБ RAM, а также домен, A-запись которого указывает на IP сервера. Загрузите проект на сервер и запустите установщик:
 ```bash
-docker compose up -d --build
+sudo bash deploy/install.sh
 ```
-Перед контейнером нужен TLS-прокси (Caddy или nginx) с HTTPS: Telegram открывает Mini App только по https. Миграции применяются автоматически при старте.
+Скрипт ставит Docker, спрашивает домен и ключи, сам генерирует пароли и запускает PostgreSQL, приложение и Caddy. Caddy автоматически получает HTTPS-сертификат. Миграции применяются при старте. После запуска скрипт покажет, что настроить в @BotFather и Crypto Pay.
+
+Без скрипта: заполните `.env` по образцу `.env.example` и выполните `docker compose up -d --build`.
 
 ### 3. Локальная разработка
 ```bash
@@ -106,7 +109,7 @@ TEST_DATABASE_URL=postgres://postgres@localhost:5432/wallet_test npm test
 
 - [ ] `CRYPTOPAY_NETWORK=mainnet`, токен основного приложения, включены Transfers, на балансе приложения есть средства
 - [ ] `BOT_MODE=webhook`, задан длинный случайный `TELEGRAM_WEBHOOK_SECRET`
-- [ ] HTTPS, `TRUST_PROXY=true` за прокси
+- [ ] Домен указывает на сервер, `https://<домен>/api/health` отвечает `{"ok":true}`
 - [ ] Резервные копии PostgreSQL
 - [ ] Мониторинг логов с `withdrawal moved to manual review` и `paid invoice does not match deposit`: это ситуации для ручного разбора
 - [ ] При нескольких репликах счётчики частоты запросов нужно перенести в Redis (`@fastify/rate-limit` поддерживает это из коробки). Воркеры к нескольким репликам уже готовы

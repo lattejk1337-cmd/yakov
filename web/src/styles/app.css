@@ -695,6 +695,34 @@ button:disabled {
   }
 }
 
+/* Wordmark at the end of the feed. */
+.brand-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 36px 0 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.brand-foot__mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--faint);
+  color: var(--bg);
+  font-size: 12px;
+  letter-spacing: 0;
+  transform: rotate(-7deg);
+}
+
 /* ─────────────────────────────── amount screen ─────────────────────────────── */
 
 .head {

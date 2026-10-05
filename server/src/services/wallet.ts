@@ -203,7 +203,7 @@ export class WalletService {
         asset: a.code,
         amount: formatAmount(amount, a.decimals),
         payload: id,
-        description: `Пополнение кошелька на ${formatAmount(amount, a.decimals)} ${a.code}`,
+        description: `Пополнение Tonum Wallet на ${formatAmount(amount, a.decimals)} ${a.code}`,
         expiresInSec: DEPOSIT_TTL_SEC,
       });
     } catch (err) {
@@ -457,7 +457,7 @@ export class WalletService {
       asset: w.asset,
       amount: formatAmount(BigInt(w.amount), a.decimals),
       spendId: w.id,
-      comment: 'Вывод из кошелька',
+      comment: 'Вывод из Tonum Wallet',
     };
 
     try {
