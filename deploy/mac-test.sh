@@ -54,7 +54,8 @@ pg_pass="$(get_env POSTGRES_PASSWORD)"
 if [ -z "$pg_pass" ]; then
   pg_pass="$(openssl rand -hex 24)"
   # A test database left from an earlier run has a password we no longer know: start clean.
-  "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  # (The variable is passed explicitly: docker compose refuses to run without it, and .env is gone.)
+  POSTGRES_PASSWORD=reset "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 fi
 ok "Ключи на месте (сохраняются в файле .env — повторно вводить не нужно)"
 
@@ -223,7 +224,21 @@ write_env
 "${COMPOSE[@]}" up -d db
 "${COMPOSE[@]}" up -d --build --force-recreate app
 printf 'Ждём запуска'
-if ! wait_healthy 60; then
+status=0
+wait_healthy 60 || status=$?
+if [ "$status" -ne 0 ] &&
+  "${COMPOSE[@]}" logs --no-log-prefix app 2>/dev/null | grep -q 'password authentication failed'; then
+  # The test database still has a password from an earlier run: recreate it once and retry.
+  echo
+  warn "Старая тестовая база не подходит по паролю — создаём её заново…"
+  "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" up -d db
+  "${COMPOSE[@]}" up -d --force-recreate app
+  printf 'Ждём запуска'
+  status=0
+  wait_healthy 60 || status=$?
+fi
+if [ "$status" -ne 0 ]; then
   echo
   warn "Приложение не запустилось. Последние строки его журнала:"
   "${COMPOSE[@]}" logs --no-log-prefix --tail 30 app >&2 || true
