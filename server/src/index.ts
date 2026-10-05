@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { pino } from 'pino';
-import { BotNotifier, configureBot, createBot } from './bot/bot.js';
+import { BotNotifier, BotNotReadyError, configureBot, createBot } from './bot/bot.js';
 import { loadConfig } from './config.js';
 import { migrate } from './db/migrate.js';
 import { createPool } from './db/pool.js';
@@ -44,36 +44,66 @@ const app = await buildApp({
   provider,
   wallet,
   logger: log,
-  handleTelegramUpdate: (update) => bot.handleUpdate(update as never),
+  handleTelegramUpdate: async (update) => {
+    // Until the bot has connected, ask Telegram to redeliver instead of dropping the update.
+    if (!bot.isInited()) throw new BotNotReadyError();
+    await bot.handleUpdate(update as never);
+  },
   staticDir: fileURLToPath(new URL('../../web/dist/', import.meta.url)),
 });
 
+let shuttingDown = false;
 const stops: Array<() => void> = [];
 if (config.WORKERS_ENABLED) {
   stops.push(every('withdrawals', 5_000, () => wallet.processDueWithdrawals(), log));
   stops.push(every('deposits', 30_000, () => wallet.reconcileDeposits(), log));
 }
 
-// Initialize the bot before accepting traffic so webhook updates can be handled right away.
-if (config.BOT_MODE !== 'off') await bot.init();
-
 await app.listen({ host: config.HOST, port: config.PORT });
 
-if (config.BOT_MODE !== 'off') {
-  await configureBot(bot, config, log);
-  if (config.BOT_MODE === 'polling') {
-    await bot.api.deleteWebhook();
-    void bot.start({ drop_pending_updates: true, onStart: () => log.info('bot polling started') });
-  } else {
-    await bot.api.setWebhook(`${config.PUBLIC_URL!.replace(/\/$/, '')}/telegram/webhook`, {
-      secret_token: config.TELEGRAM_WEBHOOK_SECRET,
-      allowed_updates: ['message'],
-    });
-    log.info('bot webhook registered');
+/**
+ * The wallet must work even when Telegram's API is slow or unreachable, so the bot
+ * starts in the background and keeps retrying instead of blocking or crashing the server.
+ */
+async function startBot(): Promise<void> {
+  for (let attempt = 1; !shuttingDown; attempt++) {
+    try {
+      // grammY retries network errors during init forever and silently, so say what is going on.
+      const waiting = setInterval(
+        () => log.warn('cannot reach api.telegram.org yet; the bot keeps trying (wallet API is up)'),
+        20_000,
+      );
+      try {
+        await bot.init();
+      } finally {
+        clearInterval(waiting);
+      }
+      log.info({ username: bot.botInfo.username }, 'connected to Telegram');
+      await configureBot(bot, config, log);
+      if (config.BOT_MODE === 'polling') {
+        await bot.api.deleteWebhook();
+        log.info('bot polling started');
+        // Resolves when polling stops; rejects on a fatal polling error.
+        await bot.start({ drop_pending_updates: true });
+        if (shuttingDown) return;
+        throw new Error('polling stopped unexpectedly');
+      }
+      await bot.api.setWebhook(`${config.PUBLIC_URL!.replace(/\/$/, '')}/telegram/webhook`, {
+        secret_token: config.TELEGRAM_WEBHOOK_SECRET,
+        allowed_updates: ['message'],
+      });
+      log.info('bot webhook registered');
+      return;
+    } catch (err) {
+      if (shuttingDown) return;
+      const delay = Math.min(60, 5 * attempt);
+      log.error({ err, attempt }, `telegram bot is not reachable; retrying in ${delay}s`);
+      await new Promise((r) => setTimeout(r, delay * 1000).unref());
+    }
   }
 }
+if (config.BOT_MODE !== 'off') void startBot();
 
-let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;

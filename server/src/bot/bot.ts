@@ -4,8 +4,12 @@ import type { Logger, Notifier } from '../services/wallet.js';
 
 export const APP_NAME = 'Tonum Wallet';
 
+/** Thrown for webhook updates that arrive before the bot has connected to Telegram. */
+export class BotNotReadyError extends Error {}
+
 export function createBot(config: Config, log: Logger): Bot {
-  const bot = new Bot(config.BOT_TOKEN);
+  // Don't hang for minutes on a dead connection; must stay above the 30s long-polling window.
+  const bot = new Bot(config.BOT_TOKEN, { client: { timeoutSeconds: 40 } });
   const openButton = () =>
     config.WEBAPP_URL ? new InlineKeyboard().webApp(`Открыть ${APP_NAME}`, config.WEBAPP_URL) : undefined;
 

@@ -207,9 +207,11 @@ ASSETS=USDT,TON
 ENV
 }
 
+# Waits for the app to answer; returns early (status 2) if its container has stopped.
 wait_healthy() {
   for _ in $(seq 1 "$1"); do
     curl -fsS --max-time 2 http://localhost:3000/api/health >/dev/null 2>&1 && return 0
+    [ -n "$("${COMPOSE[@]}" ps -q --status running app 2>/dev/null)" ] || return 2
     printf '.'
     sleep 3
   done
@@ -221,14 +223,34 @@ write_env
 "${COMPOSE[@]}" up -d db
 "${COMPOSE[@]}" up -d --build --force-recreate app
 printf 'Ждём запуска'
-if ! wait_healthy 100; then
+if ! wait_healthy 60; then
   echo
-  warn "Приложение не отвечает. Последние строки журнала:"
-  "${COMPOSE[@]}" logs --tail 40 app >&2 || true
-  exit 1
+  warn "Приложение не запустилось. Последние строки его журнала:"
+  "${COMPOSE[@]}" logs --no-log-prefix --tail 30 app >&2 || true
+  die "Пришлите снимок этого окна — по журналу будет видно, в чём дело."
 fi
 echo
 ok "Приложение запущено"
+
+# The wallet works without the bot, but nobody can open it if the bot can't reach Telegram.
+printf 'Подключаем бота к Telegram'
+bot_ok=no
+for _ in $(seq 1 20); do
+  logs="$("${COMPOSE[@]}" logs --no-log-prefix app 2>/dev/null || true)"
+  if printf '%s' "$logs" | grep -q 'bot polling started'; then bot_ok=yes; break; fi
+  if printf '%s' "$logs" | grep -q '401: Unauthorized\|404: Not Found'; then bot_ok=bad_token; break; fi
+  printf '.'
+  sleep 2
+done
+echo
+if [ "$bot_ok" = yes ]; then
+  ok "Бот подключён"
+elif [ "$bot_ok" = bad_token ]; then
+  die "Telegram не принял ключ бота. Проверьте ключ от @BotFather: удалите файл .env (rm .env) и запустите скрипт снова."
+else
+  warn "Бот пока не может связаться с серверами Telegram (api.telegram.org)."
+  warn "Скорее всего, эта сеть их не пропускает. Включите VPN на Mac или смените сеть — бот подключится сам, перезапускать ничего не нужно."
+fi
 active_url="$url"
 
 reachable=no

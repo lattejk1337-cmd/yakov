@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { type CryptoPayWebhookUpdate, toProviderInvoice, verifyCryptoPaySignature } from '../../providers/cryptopay.js';
+import { BotNotReadyError } from '../../bot/bot.js';
 import type { AppDeps } from '../app.js';
 
 function safeEqual(a: string, b: string): boolean {
@@ -53,6 +54,8 @@ export function webhookRoutes(deps: AppDeps): FastifyPluginAsync {
         try {
           await handle(update);
         } catch (err) {
+          // Not connected to Telegram yet: a 503 makes Telegram retry the update later.
+          if (err instanceof BotNotReadyError) return reply.status(503).send();
           // Acknowledge anyway: Telegram would otherwise redeliver a poison update forever.
           req.log.error({ err }, 'telegram update handling failed');
         }
