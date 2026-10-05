@@ -77,9 +77,15 @@ if [ -z "$cf" ]; then
   fi
 fi
 
-SSH_OPTS=(-n -o BatchMode=yes -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new
-  -o UserKnownHostsFile=.bin/known_hosts -o ServerAliveInterval=30 -o ServerAliveCountMax=3
-  -o ConnectTimeout=15 -o ExitOnForwardFailure=yes)
+# The free SSH tunnels accept any key (or an empty password). Use a throwaway key that lives
+# only in this folder, and answer a password prompt with an empty line instead of blocking.
+[ -f .bin/tunnel_key ] || ssh-keygen -q -t ed25519 -N "" -C tonum-wallet-tunnel -f .bin/tunnel_key >/dev/null 2>&1 || true
+printf '#!/bin/sh\necho\n' >.bin/askpass && chmod +x .bin/askpass
+SSH_OPTS=(-n -o NumberOfPasswordPrompts=1
+  -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=.bin/known_hosts
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -o ExitOnForwardFailure=yes)
+[ -f .bin/tunnel_key ] && SSH_OPTS+=(-i .bin/tunnel_key -o IdentitiesOnly=yes)
+tunnel_ssh() { SSH_ASKPASS="$PWD/.bin/askpass" SSH_ASKPASS_REQUIRE=force ssh "${SSH_OPTS[@]}" "$@"; }
 
 tunnel_pid=""
 provider=""
@@ -112,8 +118,8 @@ launch() {
     cloudflare-http2 | cloudflare-quic)
       [ -x "$cf" ] || return 1
       "$cf" tunnel --no-autoupdate --protocol "${provider#cloudflare-}" --url http://localhost:3000 ;;
-    localhostrun) ssh "${SSH_OPTS[@]}" -R 80:localhost:3000 nokey@localhost.run ;;
-    pinggy) ssh "${SSH_OPTS[@]}" -p 443 -R 0:localhost:3000 a.pinggy.io ;;
+    localhostrun) tunnel_ssh -R 80:localhost:3000 nokey@localhost.run ;;
+    pinggy) tunnel_ssh -p 443 -R 0:localhost:3000 free@a.pinggy.io ;;
   esac
 }
 
@@ -165,13 +171,13 @@ connect_any() {
       ok "Подключено через $(name_of "$p")"
       return 0
     fi
-    warn "$(name_of "$p") не подключился."
+    warn "$(name_of "$p") не подключился:"
+    grep -v '^[[:space:]]*$' .tunnel.log 2>/dev/null | tail -2 | sed 's/^/      /' >&2 || true
   done
   return 1
 }
 
 connect_any || {
-  tail -15 .tunnel.log >&2 2>/dev/null || true
   die "Ни один туннель не подключился. Проверьте интернет; если включён VPN — попробуйте с ним и без него, затем запустите скрипт снова."
 }
 ok "Адрес: $url"
