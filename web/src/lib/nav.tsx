@@ -1,73 +1,80 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { telegram } from './telegram';
 
-export type Mode = 'deposit' | 'withdraw';
+export type Tab = 'home' | 'exchange' | 'history' | 'profile';
 
-export type Route =
-  | { name: 'home' }
-  | { name: 'amount'; mode: Mode; asset: string }
-  | { name: 'withdraw-confirm'; asset: string; amount: string }
-  | { name: 'pin-setup'; then?: Route }
+export type Overlay =
+  | { name: 'deposit'; asset: string }
+  | { name: 'withdraw'; asset: string }
+  | { name: 'operation'; kind: 'deposit' | 'withdrawal' | 'exchange'; id: string }
   | { name: 'pin-change' }
-  | { name: 'operation'; kind: 'deposit' | 'withdrawal'; id: string }
-  | { name: 'security' };
+  | { name: 'about' };
 
 interface Entry {
   key: number;
-  route: Route;
+  overlay: Overlay;
+  closing: boolean;
 }
 
 interface Nav {
-  route: Route;
-  key: number;
-  direction: 'forward' | 'back';
-  canGoBack: boolean;
-  push(route: Route): void;
-  replace(route: Route): void;
-  back(): void;
-  home(): void;
+  tab: Tab;
+  setTab(tab: Tab): void;
+  overlays: Entry[];
+  open(o: Overlay): void;
+  replace(o: Overlay): void;
+  close(): void;
+  closeAll(): void;
 }
 
 const NavContext = createContext<Nav | null>(null);
 let seq = 0;
+const CLOSE_MS = 320;
 
-/** A tiny stack router wired to Telegram's native BackButton. */
+/**
+ * Tabs at the bottom, flows as sheets sliding over them (iOS modal style).
+ * Telegram's native BackButton closes the top sheet.
+ */
 export function NavProvider({ children }: { children: ReactNode }) {
-  const [stack, setStack] = useState<Entry[]>([{ key: seq++, route: { name: 'home' } }]);
-  const [direction, setDirection] = useState<'forward' | 'back'>('forward');
+  const [tab, setTabState] = useState<Tab>('home');
+  const [overlays, setOverlays] = useState<Entry[]>([]);
 
-  const push = useCallback((route: Route) => {
-    setDirection('forward');
-    setStack((s) => [...s, { key: seq++, route }]);
-  }, []);
-  const replace = useCallback((route: Route) => {
-    setDirection('forward');
-    setStack((s) => [...s.slice(0, -1), { key: seq++, route }]);
-  }, []);
-  const back = useCallback(() => {
-    setDirection('back');
-    setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
-  }, []);
-  const home = useCallback(() => {
-    setDirection('back');
-    setStack((s) => s.slice(0, 1));
+  const setTab = useCallback((t: Tab) => {
+    telegram.haptic.select();
+    setTabState(t);
   }, []);
 
-  const top = stack[stack.length - 1]!;
-  const canGoBack = stack.length > 1;
+  const open = useCallback((overlay: Overlay) => {
+    setOverlays((s) => [...s, { key: seq++, overlay, closing: false }]);
+  }, []);
 
+  const replace = useCallback((overlay: Overlay) => {
+    setOverlays((s) => [...s.slice(0, -1), { key: seq++, overlay, closing: false }]);
+  }, []);
+
+  const close = useCallback(() => {
+    setOverlays((s) => {
+      const top = s[s.length - 1];
+      if (!top || top.closing) return s;
+      const key = top.key;
+      window.setTimeout(() => setOverlays((cur) => cur.filter((e) => e.key !== key)), CLOSE_MS);
+      return [...s.slice(0, -1), { ...top, closing: true }];
+    });
+  }, []);
+
+  const closeAll = useCallback(() => {
+    setOverlays((s) => s.map((e) => ({ ...e, closing: true })));
+    window.setTimeout(() => setOverlays([]), CLOSE_MS);
+  }, []);
+
+  const hasOverlay = overlays.some((o) => !o.closing);
   useEffect(() => {
-    if (!canGoBack) return;
-    return telegram.backButton.show(back);
-  }, [canGoBack, back]);
-
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [top.key]);
+    if (!hasOverlay) return;
+    return telegram.backButton.show(close);
+  }, [hasOverlay, close]);
 
   const value = useMemo<Nav>(
-    () => ({ route: top.route, key: top.key, direction, canGoBack, push, replace, back, home }),
-    [top, direction, canGoBack, push, replace, back, home],
+    () => ({ tab, setTab, overlays, open, replace, close, closeAll }),
+    [tab, setTab, overlays, open, replace, close, closeAll],
   );
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }

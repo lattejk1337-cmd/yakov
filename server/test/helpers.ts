@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { signInitData } from '../src/auth/telegram.js';
+import { TokenSigner } from '../src/auth/tokens.js';
 import { loadConfig } from '../src/config.js';
 import { migrate } from '../src/db/migrate.js';
 import { createPool, type Db } from '../src/db/pool.js';
 import { AssetRegistry } from '../src/domain/assets.js';
 import { buildApp } from '../src/http/app.js';
+import { MOCK_RATES } from '../src/providers/mock.js';
 import {
   type CreateInvoiceInput,
+  type ExchangeRate,
   type PaymentProvider,
   type ProviderInvoice,
   ProviderRejectedError,
@@ -14,6 +17,7 @@ import {
   ProviderUnavailableError,
   type TransferInput,
 } from '../src/providers/types.js';
+import { RatesService } from '../src/services/rates.js';
 import { type Notifier, WalletService } from '../src/services/wallet.js';
 
 export const BOT_TOKEN = '123456:TEST_TOKEN_abcdefghijklmnopqrstuvwxyz';
@@ -29,9 +33,18 @@ export class FakeProvider implements PaymentProvider {
   transfers = new Map<string, ProviderTransfer>();
   transferCalls: TransferInput[] = [];
   transferBehavior: (input: TransferInput) => 'ok' | 'reject' | 'timeout' | 'timeout-after-send' = () => 'ok';
+  invoiceInputs: CreateInvoiceInput[] = [];
+  rates: ExchangeRate[] = MOCK_RATES.map((r) => ({ ...r }));
+  ratesDown = false;
+
+  async getRates(): Promise<ExchangeRate[]> {
+    if (this.ratesDown) throw new ProviderUnavailableError('rates down');
+    return this.rates.map((r) => ({ ...r }));
+  }
   rejectReason = 'INSUFFICIENT_FUNDS';
 
   async createInvoice(input: CreateInvoiceInput): Promise<ProviderInvoice> {
+    this.invoiceInputs.push(input);
     const invoiceId = String(this.invoices.size + 1000);
     const inv: ProviderInvoice = {
       invoiceId,
@@ -108,6 +121,7 @@ export function testConfig(overrides: Record<string, string> = {}) {
     WORKERS_ENABLED: 'false',
     SERVE_STATIC: 'false',
     RATE_LIMIT_SENSITIVE_PER_MIN: '1000',
+    ASSETS: 'USDT,TON,RUB,USD',
     ...overrides,
   });
 }
@@ -117,9 +131,14 @@ export async function createTestApp(db: Db, overrides: Record<string, string> = 
   const assets = new AssetRegistry(config.ASSETS);
   const provider = new FakeProvider();
   const notifier = new RecordingNotifier();
-  const wallet = new WalletService(db, assets, provider, notifier, silentLog);
-  const app = await buildApp({ config, db, assets, provider, wallet });
-  return { app, wallet, provider, notifier, config };
+  const signer = new TokenSigner(config.BOT_TOKEN);
+  const wallet = new WalletService(db, assets, provider, notifier, silentLog, {
+    rates: new RatesService(provider, 0),
+    signer,
+    feeBps: config.EXCHANGE_FEE_BPS,
+  });
+  const app = await buildApp({ config, db, assets, provider, wallet, signer });
+  return { app, wallet, provider, notifier, config, signer };
 }
 
 export function initDataFor(userId: number, extra: Partial<{ authDate: number; firstName: string }> = {}): string {
@@ -133,9 +152,23 @@ export function initDataFor(userId: number, extra: Partial<{ authDate: number; f
   );
 }
 
+export const testSigner = new TokenSigner(BOT_TOKEN);
+
+/** A session as issued after entering the PIN. */
+export function sessionFor(userId: number, ttlSec = 600): string {
+  return testSigner.sign('session', { u: userId }, ttlSec);
+}
+
+/** Telegram auth only (lock-screen endpoints). */
+export function tgHeaders(userId: number): Record<string, string> {
+  return { authorization: `tma ${initDataFor(userId)}` };
+}
+
+/** Telegram auth plus an unlocked session. */
 export function authHeaders(userId: number, idempotencyKey?: string): Record<string, string> {
   return {
     authorization: `tma ${initDataFor(userId)}`,
+    'x-wallet-session': sessionFor(userId),
     ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
   };
 }

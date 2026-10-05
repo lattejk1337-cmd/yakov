@@ -1,287 +1,202 @@
 import type { CSSProperties } from 'react';
-import { Icon } from '../components/Icon';
-import { Odometer } from '../components/Odometer';
-import type { AssetInfo, Me, Operation } from '../lib/api';
-import { dayLabel, fmt, greeting, time } from '../lib/format';
-import { splitDisplay, toUnits } from '../lib/money';
+import { Avatar } from '../components/Avatar';
+import { CountUp } from '../components/CountUp';
+import { CurrencyIcon } from '../components/CurrencyIcon';
+import { Icon, type IconName } from '../components/Icon';
+import { OperationRow } from '../components/OperationRow';
+import type { AssetInfo, Me } from '../lib/api';
+import { look } from '../lib/currencies';
+import { approx, greeting, money } from '../lib/format';
+import { formatNumber, NBSP } from '../lib/money';
 import { useNav } from '../lib/nav';
-import { usePref } from '../lib/prefs';
-import { useHistory, useMe } from '../lib/queries';
+import { useHistory } from '../lib/queries';
 import { telegram } from '../lib/telegram';
 
-const TICKS = 36;
+export function Home({
+  me,
+  selected,
+  onSelect,
+  displayCurrency,
+  hidden,
+  onToggleHidden,
+}: {
+  me: Me;
+  selected: string;
+  onSelect: (code: string) => void;
+  displayCurrency: string;
+  hidden: boolean;
+  onToggleHidden: () => void;
+}) {
+  const nav = useNav();
+  const asset = me.assets.find((a) => a.code === selected) ?? me.assets[0]!;
+  const name = me.user.firstName || me.user.username || '';
 
-export function Home() {
-  const me = useMe();
-  const [hidden, setHidden] = usePref('hideBalance', false);
-  const [selected, setSelected] = usePref<string | null>('asset', null);
+  // Total in the display currency: market-rate estimate, display only.
+  let total: number | null = 0;
+  for (const a of me.assets) {
+    const v = approx(me.balances[a.code] ?? '0', a.code, displayCurrency, me.prices);
+    if (v === null) {
+      total = null;
+      break;
+    }
+    total += v;
+  }
+  const dispSymbol = look(displayCurrency).glyph;
 
-  if (!me.data) return <HomeSkeleton />;
-  const data = me.data;
-  const asset = data.assets.find((a) => a.code === selected) ?? data.assets[0]!;
+  const actions: Array<{ label: string; icon: IconName; onClick: () => void; accent?: boolean }> = [
+    { label: 'Пополнить', icon: 'plus', accent: true, onClick: () => nav.open({ name: 'deposit', asset: asset.code }) },
+    { label: 'Вывести', icon: 'up', onClick: () => nav.open({ name: 'withdraw', asset: asset.code }) },
+    { label: 'Обменять', icon: 'swap', onClick: () => nav.setTab('exchange') },
+  ];
 
   return (
-    <>
-      <TopBar me={data} />
+    <div className="page">
+      <header className="home-head">
+        <button className="home-head__user press" onClick={() => nav.setTab('profile')}>
+          <Avatar name={name} photoUrl={me.user.photoUrl} size={44} />
+          <span>
+            <span className="caption">{greeting()}</span>
+            <span className="home-head__name">{name}</span>
+          </span>
+        </button>
+        <button className="icon-btn glass press" onClick={onToggleHidden} aria-label={hidden ? 'Показать балансы' : 'Скрыть балансы'}>
+          <Icon name={hidden ? 'eyeOff' : 'eye'} size={20} />
+        </button>
+      </header>
 
-      <div className="tabs" role="tablist" aria-label="Актив">
-        {data.assets.map((a) => (
-          <button
+      <section className="total glass glass--strong" aria-label="Общий баланс">
+        <span className="caption">Общий баланс</span>
+        <div className="total__value">
+          {hidden ? (
+            <span className="masked">•••••</span>
+          ) : total === null ? (
+            <span className="total__na">Курсы обновляются…</span>
+          ) : (
+            <>
+              <span className="total__approx">≈</span>
+              <CountUp value={total} format={(n) => `${formatNumber(n.toFixed(2), 2)}${NBSP}${dispSymbol}`} />
+            </>
+          )}
+        </div>
+        <span className="total__hint caption">
+          {me.assets.length} {me.assets.length === 1 ? 'валюта' : 'валюты'} · по курсу CryptoBot
+        </span>
+      </section>
+
+      <div className="cards" role="listbox" aria-label="Счета">
+        {me.assets.map((a, i) => (
+          <CurrencyCard
             key={a.code}
-            role="tab"
-            className="tab"
-            aria-selected={a.code === asset.code}
+            asset={a}
+            balance={me.balances[a.code] ?? '0'}
+            selected={a.code === asset.code}
+            hidden={hidden}
+            index={i}
             onClick={() => {
               telegram.haptic.select();
-              setSelected(a.code);
+              onSelect(a.code);
             }}
-          >
-            {a.code}
+          />
+        ))}
+      </div>
+
+      <div className="actions">
+        {actions.map((a) => (
+          <button key={a.label} className={`action glass press${a.accent ? ' action--accent' : ''}`} onClick={a.onClick}>
+            <span className="action__icon">
+              <Icon name={a.icon} size={22} stroke={2.2} />
+            </span>
+            <span>{a.label}</span>
           </button>
         ))}
       </div>
 
-      <BalanceTicket
-        asset={asset}
-        balance={data.balances[asset.code] ?? '0'}
-        withdrawn={data.withdrawnToday[asset.code] ?? '0'}
-        hidden={hidden}
-        onToggleHidden={() => {
-          telegram.haptic.tap();
-          setHidden(!hidden);
-        }}
-      />
-
-      <Actions me={data} asset={asset} />
-      <Feed assets={data.assets} />
-      <footer className="brand-foot" aria-hidden="true">
-        <span className="brand-foot__mark">T</span> Tonum Wallet
-      </footer>
-    </>
-  );
-}
-
-function TopBar({ me }: { me: Me }) {
-  const nav = useNav();
-  const initial = (me.user.firstName || me.user.username || '?').trim().charAt(0).toUpperCase();
-  return (
-    <header className="topbar">
-      <div className="avatar" aria-hidden="true">
-        {me.user.photoUrl ? <img src={me.user.photoUrl} alt="" referrerPolicy="no-referrer" /> : initial}
-      </div>
-      <div className="topbar__hello">
-        <div className="label">{greeting()}</div>
-        <div className="topbar__name">{me.user.firstName || me.user.username}</div>
-      </div>
-      <button className="icon-btn" aria-label="Безопасность" onClick={() => nav.push({ name: 'security' })}>
-        <Icon name="shield" />
-        {!me.security.hasPin && <span className="icon-btn__badge" aria-label="PIN не установлен" />}
-      </button>
-    </header>
-  );
-}
-
-function BalanceTicket({
-  asset,
-  balance,
-  withdrawn,
-  hidden,
-  onToggleHidden,
-}: {
-  asset: AssetInfo;
-  balance: string;
-  withdrawn: string;
-  hidden: boolean;
-  onToggleHidden: () => void;
-}) {
-  const { int, frac } = splitDisplay(balance, asset.inputDecimals);
-  const limit = toUnits(asset.dailyWithdrawLimit, asset.decimals);
-  const used = toUnits(withdrawn, asset.decimals);
-  const left = limit > used ? limit - used : 0n;
-  const lit = limit > 0n ? Number((left * BigInt(TICKS)) / limit) : 0;
-  const leftStr = splitDisplay((left / 10n ** BigInt(asset.decimals)).toString(), 0).int;
-
-  return (
-    <section className="ticket" aria-label={`Баланс ${asset.code}`}>
-      <div className="ticket__main">
-        <div className="ticket__row">
-          <span className="label">Баланс</span>
-          <button className="eye" onClick={onToggleHidden} aria-label={hidden ? 'Показать баланс' : 'Скрыть баланс'}>
-            <Icon name={hidden ? 'eyeOff' : 'eye'} size={18} />
-          </button>
-        </div>
-
-        <div className="balance" style={{ '--len': int.length + 2 } as CSSProperties}>
-          {hidden ? (
-            <span className="balance__hidden">••••</span>
-          ) : (
-            <>
-              <Odometer value={int} />
-              {frac && (
-                <span className="balance__frac">
-                  .<Odometer value={frac} />
-                </span>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="ruler" aria-hidden="true">
-          {Array.from({ length: TICKS }, (_, i) => (
-            <i key={i} className={i < lit ? 'on' : undefined} />
-          ))}
-        </div>
-        <div className="ruler-caption">
-          <span className="label">Лимит / 24ч</span>
-          <span className="label">
-            {hidden ? '••' : leftStr} / {splitDisplay(asset.dailyWithdrawLimit, 0).int}
-          </span>
-        </div>
-      </div>
-
-      <div className="ticket__stub" aria-hidden="true">
-        <span className="ticket__serial">№ {asset.name.toUpperCase()}</span>
-        <span className="ticket__code">{asset.code}</span>
-      </div>
-    </section>
-  );
-}
-
-function Actions({ me, asset }: { me: Me; asset: AssetInfo }) {
-  const nav = useNav();
-  const withdraw = () => {
-    const target = { name: 'amount', mode: 'withdraw', asset: asset.code } as const;
-    nav.push(me.security.hasPin ? target : { name: 'pin-setup', then: target });
-  };
-  return (
-    <div className="actions">
-      <button className="action action--in" onClick={() => nav.push({ name: 'amount', mode: 'deposit', asset: asset.code })}>
-        <span className="action__icon">
-          <Icon name="down" />
-        </span>
-        <span>
-          <div className="action__title">Пополнить</div>
-          <div className="action__hint">через CryptoBot</div>
-        </span>
-      </button>
-      <button className="action action--out" onClick={withdraw}>
-        <span className="action__icon">
-          <Icon name="up" />
-        </span>
-        <span>
-          <div className="action__title">Вывести</div>
-          <div className="action__hint">
-            комиссия {fmt(asset.withdrawFee, asset)} {asset.code}
-          </div>
-        </span>
-      </button>
+      <Recent me={me} hidden={hidden} />
     </div>
   );
 }
 
-function Feed({ assets }: { assets: AssetInfo[] }) {
-  const history = useHistory();
-  const nav = useNav();
-  const items = history.data?.pages.flatMap((p) => p.items) ?? [];
-  const byCode = new Map(assets.map((a) => [a.code, a]));
-
-  let lastDay = '';
+function CurrencyCard({
+  asset,
+  balance,
+  selected,
+  hidden,
+  index,
+  onClick,
+}: {
+  asset: AssetInfo;
+  balance: string;
+  selected: boolean;
+  hidden: boolean;
+  index: number;
+  onClick: () => void;
+}) {
+  const l = look(asset.code);
   return (
-    <section className="feed" aria-label="История операций">
-      <div className="label">Движение средств</div>
-
-      {history.isPending && (
-        <div style={{ marginTop: 16 }}>
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="skel" style={{ height: 52, marginBottom: 10 }} />
-          ))}
-        </div>
-      )}
-
-      {history.isSuccess && items.length === 0 && (
-        <div className="empty">
-          <div className="empty__art" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </div>
-          <div className="label">Пока пусто</div>
-          <div style={{ marginTop: 6 }}>Пополните Tonum Wallet — операции появятся здесь</div>
-        </div>
-      )}
-
-      {items.map((op) => {
-        const day = dayLabel(op.createdAt);
-        const header = day !== lastDay ? day : null;
-        lastDay = day;
-        return (
-          <div key={op.id}>
-            {header && <div className="label feed__day">{header}</div>}
-            <OperationRow
-              op={op}
-              asset={byCode.get(op.asset)}
-              onClick={() => nav.push({ name: 'operation', kind: op.type, id: op.id })}
-            />
-          </div>
-        );
-      })}
-
-      {history.hasNextPage && (
-        <button className="more" onClick={() => void history.fetchNextPage()} disabled={history.isFetchingNextPage}>
-          {history.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
-        </button>
-      )}
-    </section>
-  );
-}
-
-function OperationRow({ op, asset, onClick }: { op: Operation; asset?: AssetInfo; onClick: () => void }) {
-  const isIn = op.type === 'deposit';
-  const failed = op.type === 'withdrawal' && op.status === 'failed';
-  const waiting = op.type === 'withdrawal' && op.status === 'processing';
-  const amount = isIn ? op.amount : op.total;
-
-  return (
-    <button className="op" onClick={onClick}>
-      <span className={`op__icon ${isIn ? 'op__icon--in' : 'op__icon--out'}`}>
-        <Icon name={isIn ? 'down' : 'up'} size={20} />
+    <button
+      role="option"
+      aria-selected={selected}
+      className={`card glass press${selected ? ' is-selected' : ''}`}
+      style={{ '--c1': l.from, '--c2': l.to, animationDelay: `${index * 60}ms` } as CSSProperties}
+      onClick={onClick}
+    >
+      <span className="card__glow" aria-hidden="true" />
+      <span className="card__top">
+        <CurrencyIcon code={asset.code} size={36} />
+        <span className="card__code">{asset.code}</span>
       </span>
-      <span style={{ minWidth: 0 }}>
-        <div className="op__title">{isIn ? 'Пополнение' : 'Вывод'}</div>
-        <div className="op__meta">
-          {waiting && <span className="dot dot--wait" />}
-          {failed && <span className="dot dot--bad" />}
-          {time(op.createdAt)}
-          {waiting && ' · в обработке'}
-          {failed && ' · возвращено'}
-          {!waiting && !failed && ' · CryptoBot'}
-        </div>
-      </span>
-      <span className={`op__amount${isIn ? ' op__amount--plus' : ''}${failed ? ' op__amount--void' : ''}`}>
-        {isIn ? '+' : '−'}
-        {fmt(amount, asset)}
-        <small>{op.asset}</small>
-      </span>
+      <span className="card__name">{asset.name}</span>
+      <span className="card__balance">{hidden ? '•••' : money(balance, asset.code, asset)}</span>
     </button>
   );
 }
 
-function HomeSkeleton() {
+function Recent({ me, hidden }: { me: Me; hidden: boolean }) {
+  const nav = useNav();
+  const history = useHistory();
+  const items = (history.data?.pages.flatMap((p) => p.items) ?? []).slice(0, 5);
+  const assets = new Map(me.assets.map((a) => [a.code, a]));
+
   return (
-    <div aria-busy="true" aria-label="Загрузка">
-      <div className="topbar">
-        <div className="skel" style={{ width: 42, height: 42, borderRadius: 14 }} />
-        <div style={{ flex: 1 }}>
-          <div className="skel" style={{ width: 90, height: 10, marginBottom: 8 }} />
-          <div className="skel" style={{ width: 140, height: 16 }} />
+    <section className="section">
+      <div className="section__head">
+        <span className="section__title">Последние операции</span>
+        {items.length > 0 && (
+          <button className="link-btn" onClick={() => nav.setTab('history')}>
+            Все
+          </button>
+        )}
+      </div>
+      {history.isPending ? (
+        <div className="list glass">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skel-row">
+              <span className="skel skel--circle" />
+              <span className="skel skel--line" />
+            </div>
+          ))}
         </div>
-      </div>
-      <div className="skel" style={{ width: 130, height: 38, borderRadius: 999 }} />
-      <div className="skel" style={{ height: 190, borderRadius: 28, marginTop: 14 }} />
-      <div className="actions">
-        <div className="skel" style={{ height: 116, borderRadius: 28 }} />
-        <div className="skel" style={{ height: 116, borderRadius: 28 }} />
-      </div>
-    </div>
+      ) : items.length === 0 ? (
+        <div className="empty glass">
+          <span className="empty__icon">
+            <Icon name="sparkle" size={28} />
+          </span>
+          <b>Здесь появятся операции</b>
+          <span>Пополните любой счёт — это займёт минуту</span>
+        </div>
+      ) : (
+        <div className="list glass">
+          {items.map((op) => (
+            <OperationRow
+              key={op.id}
+              op={op}
+              assets={assets}
+              hidden={hidden}
+              onClick={() => nav.open({ name: 'operation', kind: op.type, id: op.id })}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

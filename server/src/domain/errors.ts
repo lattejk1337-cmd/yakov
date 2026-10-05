@@ -1,5 +1,6 @@
 export type ErrorCode =
   | 'UNAUTHORIZED'
+  | 'LOCKED'
   | 'FORBIDDEN'
   | 'USER_BLOCKED'
   | 'VALIDATION_ERROR'
@@ -19,11 +20,15 @@ export type ErrorCode =
   | 'PIN_TOO_WEAK'
   | 'PIN_LOCKED'
   | 'PROVIDER_ERROR'
+  | 'RATES_UNAVAILABLE'
+  | 'QUOTE_EXPIRED'
+  | 'SAME_CURRENCY'
   | 'RATE_LIMITED'
   | 'INTERNAL';
 
 const STATUS: Record<ErrorCode, number> = {
   UNAUTHORIZED: 401,
+  LOCKED: 401,
   FORBIDDEN: 403,
   USER_BLOCKED: 403,
   VALIDATION_ERROR: 400,
@@ -43,6 +48,9 @@ const STATUS: Record<ErrorCode, number> = {
   PIN_TOO_WEAK: 400,
   PIN_LOCKED: 423,
   PROVIDER_ERROR: 502,
+  RATES_UNAVAILABLE: 503,
+  QUOTE_EXPIRED: 409,
+  SAME_CURRENCY: 400,
   RATE_LIMITED: 429,
   INTERNAL: 500,
 };

@@ -10,6 +10,8 @@ const scrypt = (pwd: string, salt: Buffer, keylen: number, opts: ScryptOptions) 
 const PARAMS = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const KEYLEN = 32;
 
+export const PIN_LENGTH = 4;
+const PIN_RE = /^\d{4}$/;
 export const PIN_MAX_ATTEMPTS = 5;
 export const PIN_LOCK_MINUTES = 15;
 
@@ -34,7 +36,7 @@ export async function verifyPinHash(pin: string, stored: string): Promise<boolea
 
 /** Rejects malformed and trivially guessable PINs. */
 export function assertPinStrength(pin: string): void {
-  if (!/^\d{6}$/.test(pin)) throw new AppError('VALIDATION_ERROR', 'PIN должен состоять из 6 цифр');
+  if (!PIN_RE.test(pin)) throw new AppError('VALIDATION_ERROR', `PIN должен состоять из ${PIN_LENGTH} цифр`);
   const digits = [...pin].map(Number);
   const allSame = digits.every((d) => d === digits[0]);
   const step = digits[1]! - digits[0]!;
@@ -66,7 +68,7 @@ export async function changePin(db: Db, userId: number, oldPin: string, newPin: 
  * After PIN_MAX_ATTEMPTS failures the PIN is locked for PIN_LOCK_MINUTES.
  */
 export async function verifyPin(db: Db, userId: number, pin: string): Promise<void> {
-  if (typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
+  if (typeof pin !== 'string' || !PIN_RE.test(pin)) {
     throw new AppError('PIN_REQUIRED', 'Введите PIN-код');
   }
   const outcome = await withTx(db, async (c) => {

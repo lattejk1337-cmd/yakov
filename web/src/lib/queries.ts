@@ -3,13 +3,14 @@ import { useCallback } from 'react';
 import { api } from './api';
 
 export const keys = {
+  auth: ['auth'] as const,
   me: ['me'] as const,
   history: ['history'] as const,
-  deposit: (id: string) => ['deposit', id] as const,
-  withdrawal: (id: string) => ['withdrawal', id] as const,
+  op: (kind: string, id: string) => ['op', kind, id] as const,
 };
 
-export const useMe = () => useQuery({ queryKey: keys.me, queryFn: api.me, staleTime: 5_000 });
+export const useMe = () =>
+  useQuery({ queryKey: keys.me, queryFn: api.me, staleTime: 5_000, refetchInterval: 30_000 });
 
 export const useHistory = () =>
   useInfiniteQuery({

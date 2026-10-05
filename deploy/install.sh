@@ -83,7 +83,7 @@ WEBAPP_URL=https://$domain
 PAYMENT_PROVIDER=cryptopay
 CRYPTOPAY_TOKEN=$cp_token
 CRYPTOPAY_NETWORK=$network
-ASSETS=USDT,TON
+ASSETS=RUB,USD,EUR,CNY,TON
 ENV
   ok "Настройки сохранены в .env"
 fi

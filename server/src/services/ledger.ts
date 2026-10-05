@@ -1,6 +1,6 @@
 import type { DbClient, Queryable } from '../db/pool.js';
 
-export type LedgerKind = 'deposit' | 'withdrawal' | 'withdrawal_refund';
+export type LedgerKind = 'deposit' | 'withdrawal' | 'withdrawal_refund' | 'exchange';
 
 export interface Posting {
   accountId: string;
@@ -92,4 +92,6 @@ export async function getBalances(q: Queryable, userId: number): Promise<Map<str
 export const SYSTEM = {
   provider: (name: string) => `provider:${name}`,
   fees: 'fees',
+  /** The house's currency desk: the counterparty of every exchange. */
+  exchange: 'exchange',
 } as const;

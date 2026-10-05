@@ -12,11 +12,14 @@ import {
   initDataFor,
   type RecordingNotifier,
   resetDb,
+  sessionFor,
+  testSigner,
+  tgHeaders,
 } from './helpers.js';
 
 const ALICE = 1001;
 const BOB = 1002;
-const PIN = '274913';
+const PIN = '2749';
 
 let db: Db;
 let app: FastifyInstance;
@@ -83,8 +86,22 @@ async function fund(userId: number, amount: string, asset = 'USDT') {
 }
 
 async function setPin(userId: number, pin = PIN) {
-  const res = await app.inject({ method: 'POST', url: '/api/pin', headers: authHeaders(userId), payload: { pin } });
-  expect(res.statusCode).toBe(204);
+  const res = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: tgHeaders(userId), payload: { pin } });
+  expect(res.statusCode).toBe(200);
+  return res.json().session as string;
+}
+
+function quote(userId: number, from: string, to: string, amount: string) {
+  return app.inject({
+    method: 'POST',
+    url: '/api/exchange/quote',
+    headers: authHeaders(userId),
+    payload: { from, to, amount },
+  });
+}
+
+function exchange(userId: number, quoteToken: string, key = randomUUID()) {
+  return app.inject({ method: 'POST', url: '/api/exchange', headers: authHeaders(userId, key), payload: { quoteToken } });
 }
 
 function withdraw(userId: number, amount: string, opts: { pin?: string; key?: string; asset?: string } = {}) {
@@ -99,7 +116,8 @@ function withdraw(userId: number, amount: string, opts: { pin?: string; key?: st
 /** Ledger invariants: every transaction balances and cached balances equal the journal. */
 async function assertLedgerConsistent() {
   const unbalanced = await db.query(
-    `SELECT tx_id FROM ledger_entries GROUP BY tx_id HAVING SUM(amount) <> 0`,
+    `SELECT e.tx_id FROM ledger_entries e JOIN accounts a ON a.id = e.account_id
+     GROUP BY e.tx_id, a.asset HAVING SUM(e.amount) <> 0`,
   );
   expect(unbalanced.rowCount).toBe(0);
   const drift = await db.query(
@@ -130,9 +148,11 @@ describe('auth', () => {
   it('creates the user on first visit with zero balances', async () => {
     const body = await me(ALICE);
     expect(body.user).toMatchObject({ id: ALICE, firstName: 'Test' });
-    expect(body.balances).toEqual({ USDT: '0', TON: '0' });
+    expect(body.balances).toEqual({ USDT: '0', TON: '0', RUB: '0', USD: '0' });
     expect(body.security.hasPin).toBe(false);
-    expect(body.assets.map((a: { code: string }) => a.code)).toEqual(['USDT', 'TON']);
+    expect(body.assets.map((a: { code: string }) => a.code)).toEqual(['USDT', 'TON', 'RUB', 'USD']);
+    expect(body.assets.find((a: { code: string }) => a.code === 'RUB')).toMatchObject({ kind: 'fiat', symbol: '₽' });
+    expect(Number(body.prices.RUB)).toBeCloseTo(1 / 92.5, 6);
   });
 
   it('blocks banned users', async () => {
@@ -255,10 +275,10 @@ describe('pin', () => {
     await setPin(ALICE);
 
     for (let i = 4; i >= 1; i--) {
-      const res = await withdraw(ALICE, '5', { pin: '111222' });
+      const res = await withdraw(ALICE, '5', { pin: '1112' });
       expect(res.json().error).toMatchObject({ code: 'PIN_INVALID', details: { attemptsLeft: i } });
     }
-    expect((await withdraw(ALICE, '5', { pin: '111222' })).json().error.code).toBe('PIN_LOCKED');
+    expect((await withdraw(ALICE, '5', { pin: '1112' })).json().error.code).toBe('PIN_LOCKED');
     // Even the correct PIN is refused while locked.
     expect((await withdraw(ALICE, '5')).json().error.code).toBe('PIN_LOCKED');
     expect((await me(ALICE)).security.pinLockedUntil).not.toBeNull();
@@ -266,24 +286,28 @@ describe('pin', () => {
   });
 
   it('rejects weak PINs and a second setup; allows change with the old PIN', async () => {
-    const weak = await app.inject({ method: 'POST', url: '/api/pin', headers: authHeaders(ALICE), payload: { pin: '123456' } });
-    expect(weak.json().error.code).toBe('PIN_TOO_WEAK');
+    for (const pin of ['1234', '0000', '9876']) {
+      const weak = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: tgHeaders(ALICE), payload: { pin } });
+      expect(weak.json().error.code).toBe('PIN_TOO_WEAK');
+    }
+    const short = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: tgHeaders(ALICE), payload: { pin: '274913' } });
+    expect(short.json().error.code).toBe('VALIDATION_ERROR');
     await setPin(ALICE);
-    const again = await app.inject({ method: 'POST', url: '/api/pin', headers: authHeaders(ALICE), payload: { pin: '582941' } });
+    const again = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: tgHeaders(ALICE), payload: { pin: '5829' } });
     expect(again.statusCode).toBe(409);
 
     const wrongOld = await app.inject({
       method: 'POST',
       url: '/api/pin/change',
       headers: authHeaders(ALICE),
-      payload: { oldPin: '000001', newPin: '582941' },
+      payload: { oldPin: '0001', newPin: '5829' },
     });
     expect(wrongOld.json().error.code).toBe('PIN_INVALID');
     const ok = await app.inject({
       method: 'POST',
       url: '/api/pin/change',
       headers: authHeaders(ALICE),
-      payload: { oldPin: PIN, newPin: '582941' },
+      payload: { oldPin: PIN, newPin: '5829' },
     });
     expect(ok.statusCode).toBe(204);
   });
@@ -300,10 +324,17 @@ describe('withdrawals', () => {
     await fund(ALICE, '20');
     const res = await withdraw(ALICE, '10');
     expect(res.statusCode).toBe(201);
-    expect(res.json()).toMatchObject({ status: 'completed', amount: '10', fee: '0.1', total: '10.1' });
+    expect(res.json()).toMatchObject({
+      status: 'completed',
+      amount: '10',
+      fee: '0.1',
+      total: '10.1',
+      payoutAsset: 'USDT',
+      payoutAmount: '10',
+    });
     const after = await me(ALICE);
     expect(after.balances.USDT).toBe('9.9');
-    expect(after.withdrawnToday).toEqual({ USDT: '10', TON: '0' });
+    expect(after.withdrawnToday).toMatchObject({ USDT: '10', TON: '0' });
     expect(provider.transferCalls).toHaveLength(1);
     expect(provider.transferCalls[0]).toMatchObject({ telegramUserId: ALICE, asset: 'USDT', amount: '10' });
     await assertLedgerConsistent();
@@ -413,6 +444,155 @@ describe('withdrawals', () => {
   });
 });
 
+
+// ───────────────────────────── lock screen ─────────────────────────────
+
+describe('lock screen', () => {
+  it('keeps the wallet locked until the PIN is entered', async () => {
+    const locked = await app.inject({ method: 'GET', url: '/api/me', headers: tgHeaders(ALICE) });
+    expect(locked.statusCode).toBe(401);
+    expect(locked.json().error.code).toBe('LOCKED');
+
+    const state = await app.inject({ method: 'GET', url: '/api/auth/state', headers: tgHeaders(ALICE) });
+    expect(state.json()).toMatchObject({ hasPin: false, pinLength: 4, user: { id: ALICE } });
+
+    const session = await setPin(ALICE);
+    const ok = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { ...tgHeaders(ALICE), 'x-wallet-session': session },
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('unlocks only with the right PIN and counts failures', async () => {
+    await setPin(ALICE);
+    const unlock = (pin: string) =>
+      app.inject({ method: 'POST', url: '/api/auth/unlock', headers: tgHeaders(ALICE), payload: { pin } });
+    expect((await unlock('1112')).json().error).toMatchObject({ code: 'PIN_INVALID', details: { attemptsLeft: 4 } });
+    const good = await unlock(PIN);
+    expect(good.statusCode).toBe(200);
+    expect(good.json().session).toBeTruthy();
+    expect(Date.parse(good.json().expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it("rejects someone else's, forged and expired sessions", async () => {
+    const as = (session: string) =>
+      app.inject({ method: 'GET', url: '/api/me', headers: { ...tgHeaders(ALICE), 'x-wallet-session': session } });
+    expect((await as(sessionFor(BOB))).json().error.code).toBe('LOCKED');
+    expect((await as(sessionFor(ALICE).replace(/.$/, 'x'))).json().error.code).toBe('LOCKED');
+    expect((await as(testSigner.sign('session', { u: ALICE }, -1))).json().error.code).toBe('LOCKED');
+    // A token signed for another purpose (an exchange quote) is not a session.
+    expect((await as(testSigner.sign('quote', { u: ALICE }, 600))).json().error.code).toBe('LOCKED');
+  });
+});
+
+// ─────────────────────────── multi-currency ───────────────────────────
+
+describe('fiat deposits', () => {
+  it('bills fiat as a fiat invoice payable in crypto and credits the fiat amount', async () => {
+    await fund(ALICE, '1500', 'RUB');
+    expect(provider.invoiceInputs[0]).toMatchObject({ asset: 'RUB', amount: '1500', fiat: true, acceptedAssets: ['USDT', 'TON'] });
+    expect((await me(ALICE)).balances.RUB).toBe('1500');
+    expect(notifier.messages[0]!.text).toContain('1500 ₽');
+    await assertLedgerConsistent();
+  });
+});
+
+describe('exchange', () => {
+  beforeEach(async () => {
+    await setPin(ALICE);
+    await fund(ALICE, '100', 'USD');
+  });
+
+  it('quotes at the market rate with a visible 1% fee and executes atomically', async () => {
+    const q = await quote(ALICE, 'USD', 'RUB', '10');
+    expect(q.statusCode).toBe(200);
+    // 10 USD × 92.5 = 925 RUB; 1% fee = 9.25 RUB.
+    expect(q.json()).toMatchObject({ fromAmount: '10', toAmount: '915.75', fee: '9.25', rate: '92.5', feePercent: '1' });
+
+    const ex = await exchange(ALICE, q.json().quoteToken);
+    expect(ex.statusCode).toBe(201);
+    expect(ex.json()).toMatchObject({ type: 'exchange', fromAsset: 'USD', toAsset: 'RUB', toAmount: '915.75' });
+    const after = await me(ALICE);
+    expect(after.balances).toMatchObject({ USD: '90', RUB: '915.75' });
+    await assertLedgerConsistent();
+
+    const fees = await db.query(`SELECT balance FROM accounts WHERE kind = 'system' AND code = 'fees' AND asset = 'RUB'`);
+    expect(fees.rows[0].balance).toBe('925');
+  });
+
+  it('converts in both directions without floating-point drift', async () => {
+    const q = await quote(ALICE, 'USD', 'TON', '52');
+    // 52 USD / 5.2 = 10 TON, minus 1% = 9.9 TON (9 decimals).
+    expect(q.json()).toMatchObject({ toAmount: '9.9', fee: '0.1' });
+    await exchange(ALICE, q.json().quoteToken);
+    const back = await quote(ALICE, 'TON', 'USD', '9.9');
+    // 9.9 TON × 5.2 = 51.48 USD; fee rounded up to the cent: 0.52.
+    expect(back.json()).toMatchObject({ toAmount: '50.96', fee: '0.52' });
+  });
+
+  it('executes a quote once: same key replays, another key is refused', async () => {
+    const q = (await quote(ALICE, 'USD', 'RUB', '10')).json();
+    const key = randomUUID();
+    const [a, b] = await Promise.all([exchange(ALICE, q.quoteToken, key), exchange(ALICE, q.quoteToken, key)]);
+    expect(a.json().id).toBe(b.json().id);
+    const again = await exchange(ALICE, q.quoteToken);
+    expect(again.json().error.code).toBe('QUOTE_EXPIRED');
+    expect((await me(ALICE)).balances.USD).toBe('90');
+  });
+
+  it('refuses expired, foreign and tampered quotes', async () => {
+    const q = (await quote(ALICE, 'USD', 'RUB', '10')).json();
+    expect((await exchange(BOB, q.quoteToken)).json().error.code).toBe('FORBIDDEN');
+    const [body] = q.quoteToken.split('.');
+    const forged = Buffer.from(
+      JSON.stringify({ ...JSON.parse(Buffer.from(body, 'base64url').toString()), n: '99999999' }),
+    ).toString('base64url');
+    expect((await exchange(ALICE, `${forged}.${q.quoteToken.split('.')[1]}`)).json().error.code).toBe('QUOTE_EXPIRED');
+    const stale = testSigner.sign('quote', JSON.parse(Buffer.from(body, 'base64url').toString()), -1);
+    expect((await exchange(ALICE, stale)).json().error.code).toBe('QUOTE_EXPIRED');
+  });
+
+  it('checks balance at execution time and validates input', async () => {
+    const q = (await quote(ALICE, 'USD', 'RUB', '100')).json();
+    await exchange(ALICE, (await quote(ALICE, 'USD', 'RUB', '50')).json().quoteToken);
+    expect((await exchange(ALICE, q.quoteToken)).json().error.code).toBe('INSUFFICIENT_FUNDS');
+    expect((await quote(ALICE, 'USD', 'USD', '1')).json().error.code).toBe('SAME_CURRENCY');
+    expect((await quote(ALICE, 'USD', 'RUB', '0.01')).json().error.code).toBe('AMOUNT_TOO_SMALL');
+    expect((await quote(ALICE, 'USD', 'EUR', '1')).json().error.code).toBe('UNKNOWN_ASSET'); // EUR not enabled here
+    await assertLedgerConsistent();
+  });
+
+  it('reports unavailable rates instead of guessing', async () => {
+    provider.ratesDown = true;
+    const res = await quote(ALICE, 'USD', 'RUB', '10');
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.code).toBe('RATES_UNAVAILABLE');
+  });
+
+  it('shows exchanges in the history', async () => {
+    await exchange(ALICE, (await quote(ALICE, 'USD', 'RUB', '10')).json().quoteToken);
+    const res = await app.inject({ method: 'GET', url: '/api/history', headers: authHeaders(ALICE) });
+    expect(res.json().items.map((i: { type: string }) => i.type)).toEqual(['exchange', 'deposit']);
+    expect(res.json().items[0]).toMatchObject({ fromAsset: 'USD', toAsset: 'RUB', fromAmount: '10' });
+  });
+});
+
+describe('fiat withdrawals', () => {
+  it('pays fiat out in USDT at the market rate minus the spread', async () => {
+    await setPin(ALICE);
+    await fund(ALICE, '1000', 'RUB');
+    const res = await withdraw(ALICE, '500', { asset: 'RUB' });
+    expect(res.statusCode).toBe(201);
+    // 500 RUB / 92.5 = 5.4054 USDT; −1% = 5.3513 → rounded down to cents: 5.35 USDT.
+    expect(res.json()).toMatchObject({ status: 'completed', amount: '500', fee: '50', payoutAsset: 'USDT', payoutAmount: '5.35' });
+    expect(provider.transferCalls[0]).toMatchObject({ asset: 'USDT', amount: '5.35' });
+    expect((await me(ALICE)).balances.RUB).toBe('450');
+    await assertLedgerConsistent();
+  });
+});
+
 // ───────────────────────────── history ─────────────────────────────
 
 describe('history', () => {
@@ -472,5 +652,28 @@ describe('database guards', () => {
     await expect(db.query(`UPDATE accounts SET balance = -1 WHERE kind = 'user'`)).rejects.toThrow(/accounts_non_negative_chk/);
     await expect(db.query(`UPDATE ledger_entries SET amount = 1`)).rejects.toThrow(/append-only/);
     await expect(db.query(`DELETE FROM ledger_entries`)).rejects.toThrow(/append-only/);
+  });
+
+  it('rejects a ledger transaction that balances only across different currencies', async () => {
+    await fund(ALICE, '5', 'USD');
+    await fund(ALICE, '500', 'RUB');
+    const accs = await db.query<{ id: string; asset: string }>(
+      `SELECT id, asset FROM accounts WHERE kind = 'user' AND asset IN ('USD', 'RUB')`,
+    );
+    const usd = accs.rows.find((r) => r.asset === 'USD')!.id;
+    const rub = accs.rows.find((r) => r.asset === 'RUB')!.id;
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const tx = await client.query<{ id: string }>(
+        `INSERT INTO ledger_transactions (kind, ref_id) VALUES ('exchange', gen_random_uuid()) RETURNING id`,
+      );
+      await client.query(`INSERT INTO ledger_entries (tx_id, account_id, amount, balance_after) VALUES ($1, $2, -100, 0)`, [tx.rows[0]!.id, usd]);
+      await client.query(`INSERT INTO ledger_entries (tx_id, account_id, amount, balance_after) VALUES ($1, $2, 100, 0)`, [tx.rows[0]!.id, rub]);
+      await expect(client.query('COMMIT')).rejects.toThrow(/unbalanced in/);
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
+    }
   });
 });

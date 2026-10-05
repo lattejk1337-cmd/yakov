@@ -104,17 +104,50 @@ describe('crypto pay', () => {
 
 describe('pin', () => {
   it('rejects weak PINs', () => {
-    for (const weak of ['000000', '111111', '123456', '987654', '12345', 'abcdef']) {
+    for (const weak of ['0000', '1111', '1234', '9876', '123', '12345', 'abcd']) {
       expect(() => assertPinStrength(weak), weak).toThrow();
     }
-    expect(() => assertPinStrength('274913')).not.toThrow();
+    expect(() => assertPinStrength('2749')).not.toThrow();
   });
 
   it('hashes with a random salt and verifies', async () => {
-    const a = await hashPin('274913');
-    const b = await hashPin('274913');
+    const a = await hashPin('2749');
+    const b = await hashPin('2749');
     expect(a).not.toBe(b);
-    expect(await verifyPinHash('274913', a)).toBe(true);
-    expect(await verifyPinHash('274914', a)).toBe(false);
+    expect(await verifyPinHash('2749', a)).toBe(true);
+    expect(await verifyPinHash('2748', a)).toBe(false);
+  });
+});
+
+describe('fixed-point rates', () => {
+  it('derives USD prices and converts without floats', async () => {
+    const { buildUsdPrices } = await import('../src/services/rates.js');
+    const { convertUnits, formatDecimal, parseDecimal, SCALE } = await import('../src/domain/decimal.js');
+    const prices = buildUsdPrices([
+      { source: 'USDT', target: 'USD', rate: '1' },
+      { source: 'USDT', target: 'RUB', rate: '92.5' },
+      { source: 'TON', target: 'USD', rate: '5.2' },
+      { source: 'BAD', target: 'USD', rate: 'oops' },
+    ]);
+    expect(prices.get('USD')).toBe(SCALE);
+    expect(prices.has('BAD')).toBe(false);
+    // 100.00 USD → RUB (2 decimals): 9250.00
+    const rub = convertUnits(10_000n, { decimals: 2, price: prices.get('USD')! }, { decimals: 2, price: prices.get('RUB')! });
+    expect(rub).toBe(925_000n);
+    // 1 TON (9 decimals) → USD cents
+    expect(convertUnits(10n ** 9n, { decimals: 9, price: prices.get('TON')! }, { decimals: 2, price: SCALE })).toBe(520n);
+    expect(formatDecimal(parseDecimal('92.5'), 4)).toBe('92.5');
+    expect(parseDecimal('1e-7')).toBe(100_000_000_000n);
+  });
+
+  it('signs tokens per purpose and expires them', async () => {
+    const { TokenSigner } = await import('../src/auth/tokens.js');
+    const s = new TokenSigner('secret');
+    const t = s.sign('session', { u: 1 }, 60);
+    expect(s.verify('session', t)).toMatchObject({ u: 1 });
+    expect(s.verify('quote', t)).toBeNull();
+    expect(new TokenSigner('other').verify('session', t)).toBeNull();
+    expect(s.verify('session', s.sign('session', { u: 1 }, -1))).toBeNull();
+    expect(s.verify('session', 'garbage')).toBeNull();
   });
 });

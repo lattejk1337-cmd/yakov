@@ -31,13 +31,18 @@ const EnvSchema = z
 
     ASSETS: z
       .string()
-      .default('USDT,TON')
+      .default('RUB,USD,EUR,CNY,TON')
       .transform((s) =>
         s
           .split(',')
           .map((a) => a.trim().toUpperCase())
           .filter(Boolean),
       ),
+
+    /** Spread on currency exchange and on fiat withdrawals paid out in crypto, in basis points (100 = 1%). */
+    EXCHANGE_FEE_BPS: z.coerce.number().int().min(0).max(1000).default(100),
+    /** How long the app stays unlocked after the PIN is entered. */
+    SESSION_TTL_SEC: z.coerce.number().int().min(60).max(86400).default(1800),
 
     RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(120),
     /** Limit for endpoints that move money or touch the PIN. */

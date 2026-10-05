@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
   type CreateInvoiceInput,
+  type ExchangeRate,
   type PaymentProvider,
   type ProviderInvoice,
   type ProviderTransfer,
@@ -14,7 +15,9 @@ import {
 export interface CpInvoice {
   invoice_id: number;
   status: 'active' | 'paid' | 'expired';
+  currency_type?: 'crypto' | 'fiat';
   asset?: string;
+  fiat?: string;
   amount: string;
   payload?: string;
   bot_invoice_url?: string;
@@ -39,7 +42,7 @@ export function toProviderInvoice(i: CpInvoice): ProviderInvoice {
   return {
     invoiceId: String(i.invoice_id),
     status: i.status,
-    asset: i.asset ?? '',
+    asset: (i.currency_type === 'fiat' ? i.fiat : i.asset) ?? '',
     amount: i.amount,
     payload: i.payload,
     payUrl: i.mini_app_invoice_url ?? i.bot_invoice_url ?? i.pay_url ?? '',
@@ -87,9 +90,11 @@ export class CryptoPayProvider implements PaymentProvider {
   }
 
   async createInvoice(input: CreateInvoiceInput): Promise<ProviderInvoice> {
+    const currency = input.fiat
+      ? { currency_type: 'fiat', fiat: input.asset, accepted_assets: (input.acceptedAssets ?? ['USDT', 'TON']).join(',') }
+      : { currency_type: 'crypto', asset: input.asset };
     const inv = await this.call<CpInvoice>('createInvoice', {
-      currency_type: 'crypto',
-      asset: input.asset,
+      ...currency,
       amount: input.amount,
       description: input.description.slice(0, 1024),
       payload: input.payload,
@@ -118,6 +123,14 @@ export class CryptoPayProvider implements PaymentProvider {
       comment: input.comment?.slice(0, 1024),
     });
     return { transferId: String(t.transfer_id), status: 'completed' };
+  }
+
+  async getRates(): Promise<ExchangeRate[]> {
+    const items = await this.call<Array<{ is_valid: boolean; source: string; target: string; rate: string }>>(
+      'getExchangeRates',
+      {},
+    );
+    return items.filter((r) => r.is_valid).map((r) => ({ source: r.source, target: r.target, rate: r.rate }));
   }
 
   async findTransfer(spendId: string, asset: string): Promise<ProviderTransfer | null> {

@@ -9,6 +9,8 @@ import { buildApp } from './http/app.js';
 import { CryptoPayProvider } from './providers/cryptopay.js';
 import { MockProvider } from './providers/mock.js';
 import type { PaymentProvider } from './providers/types.js';
+import { TokenSigner } from './auth/tokens.js';
+import { RatesService } from './services/rates.js';
 import { WalletService } from './services/wallet.js';
 import { every } from './workers/scheduler.js';
 
@@ -33,7 +35,12 @@ const provider: PaymentProvider =
     : new MockProvider(config.PUBLIC_URL ?? `http://localhost:${config.PORT}`);
 
 const bot = createBot(config, log);
-const wallet = new WalletService(db, assets, provider, new BotNotifier(bot, config.WEBAPP_URL), log);
+const signer = new TokenSigner(config.BOT_TOKEN);
+const wallet = new WalletService(db, assets, provider, new BotNotifier(bot, config.WEBAPP_URL), log, {
+  rates: new RatesService(provider),
+  signer,
+  feeBps: config.EXCHANGE_FEE_BPS,
+});
 
 await migrate(db, (msg) => log.info(msg));
 
@@ -43,6 +50,7 @@ const app = await buildApp({
   assets,
   provider,
   wallet,
+  signer,
   logger: log,
   handleTelegramUpdate: async (update) => {
     // Until the bot has connected, ask Telegram to redeliver instead of dropping the update.

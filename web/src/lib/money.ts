@@ -18,18 +18,22 @@ export function fromUnits(units: bigint, decimals: number): string {
   return `${neg ? '-' : ''}${abs / base}${frac ? `.${frac}` : ''}`;
 }
 
-const NNBSP = ' ';
+export const NBSP = ' ';
+const THIN = ' ';
 
-/** "1248.5" → { int: "1 248", frac: "50" } with a fixed number of fraction digits. */
-export function splitDisplay(value: string, fractionDigits: number): { int: string; frac: string } {
+/** "1248.5" → { int: "1 248", frac: "50" } with between min and max fraction digits. */
+export function splitAmount(value: string, minFrac: number, maxFrac = minFrac): { int: string; frac: string } {
   const [i = '0', f = ''] = value.replace(/^-/, '').split('.');
-  const int = i.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, NNBSP);
-  return { int, frac: f.padEnd(fractionDigits, '0').slice(0, fractionDigits) };
+  const int = i.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, THIN);
+  let frac = f.slice(0, maxFrac);
+  while (frac.length > minFrac && frac.endsWith('0')) frac = frac.slice(0, -1);
+  return { int, frac: frac.padEnd(minFrac, '0') };
 }
 
-export function formatDisplay(value: string, fractionDigits: number): string {
-  const { int, frac } = splitDisplay(value, fractionDigits);
-  return `${value.startsWith('-') ? '−' : ''}${int}${frac ? `.${frac}` : ''}`;
+/** Russian-style number: "1 248,50". */
+export function formatNumber(value: string, minFrac: number, maxFrac = minFrac): string {
+  const { int, frac } = splitAmount(value, minFrac, maxFrac);
+  return `${value.startsWith('-') ? '−' : ''}${int}${frac ? `,${frac}` : ''}`;
 }
 
 /** Applies a keypad key to the typed amount, enforcing a sane format. */
@@ -42,7 +46,7 @@ export function applyKey(current: string, key: string, maxFraction: number, maxI
   if (!/^\d$/.test(key)) return current;
   const [int = '', frac] = current.split('.');
   if (frac !== undefined) return frac.length >= maxFraction ? current : current + key;
-  if (int === '0') return key; // replace a lone leading zero
+  if (int === '0') return key;
   if (int.length >= maxInt) return current;
   return current + key;
 }
@@ -51,4 +55,10 @@ export function applyKey(current: string, key: string, maxFraction: number, maxI
 export function normalize(value: string): string {
   const v = value.replace(/\.$/, '');
   return v === '' ? '0' : v;
+}
+
+/** Rounds units down to what a user may type for an asset. */
+export function floorTo(units: bigint, decimals: number, inputDecimals: number): bigint {
+  const step = 10n ** BigInt(decimals - inputDecimals);
+  return units - (units % step);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyKey, formatDisplay, fromUnits, normalize, splitDisplay, toUnits } from './money';
+import { money } from './format';
+import { applyKey, floorTo, formatNumber, fromUnits, normalize, splitAmount, toUnits } from './money';
 
 describe('money', () => {
   it('converts between strings and units exactly', () => {
@@ -7,12 +8,16 @@ describe('money', () => {
     expect(fromUnits(toUnits('1248.5', 6), 6)).toBe('1248.5');
     expect(fromUnits(-150000n, 6)).toBe('-0.15');
     expect(toUnits('abc', 6)).toBe(0n);
+    expect(floorTo(123_456_789n, 9, 3)).toBe(123_000_000n);
   });
 
-  it('formats with grouping and fixed fraction', () => {
-    expect(splitDisplay('1248.5', 2)).toEqual({ int: '1 248', frac: '50' });
-    expect(formatDisplay('1000000', 2)).toBe('1 000 000.00');
-    expect(formatDisplay('-3.2', 3)).toBe('−3.200');
+  it('formats Russian-style with grouping and comma decimals', () => {
+    expect(splitAmount('1248.5', 2)).toEqual({ int: '1 248', frac: '50' });
+    expect(formatNumber('1000000', 2)).toBe('1 000 000,00');
+    expect(formatNumber('12.3400', 2, 3)).toBe('12,34');
+    expect(formatNumber('12.345', 2, 3)).toBe('12,345');
+    expect(money('1500', 'RUB')).toBe('1 500,00 ₽');
+    expect(money('9.9', 'TON')).toBe('9,90 TON');
   });
 
   it('applies keypad input safely', () => {

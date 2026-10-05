@@ -4,31 +4,18 @@ import { Icon } from './Icon';
 
 const THRESHOLD = 0.86;
 
-/**
- * Drag the knob to the end to confirm. Deliberately harder to trigger by accident than a
- * button — the right affordance for sending money. Keyboard: focus + Enter.
- */
-export function SlideToConfirm({
-  label,
-  onConfirm,
-  disabled = false,
-}: {
-  label: string;
-  onConfirm: () => void;
-  disabled?: boolean;
-}) {
+/** Drag the knob to the end to confirm — harder to trigger by accident than a button. Keyboard: Enter. */
+export function SlideToConfirm({ label, onConfirm, disabled = false }: { label: string; onConfirm: () => void; disabled?: boolean }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const start = useRef<{ px: number; max: number } | null>(null);
   const passedHalf = useRef(false);
   const [x, setX] = useState(0);
   const [snapping, setSnapping] = useState(false);
 
-  const maxX = () => (trackRef.current ? trackRef.current.clientWidth - 62 : 0);
-
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
     if (disabled) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    start.current = { px: e.clientX - x, max: maxX() };
+    start.current = { px: e.clientX - x, max: (trackRef.current?.clientWidth ?? 0) - 64 };
     passedHalf.current = false;
     setSnapping(false);
     telegram.haptic.tap('soft');
@@ -62,7 +49,7 @@ export function SlideToConfirm({
   return (
     <div
       ref={trackRef}
-      className={`slider${snapping ? ' slider--snap' : ''}`}
+      className={`slider glass${snapping ? ' slider--snap' : ''}`}
       style={{ '--x': `${x}px` } as CSSProperties}
       role="button"
       tabIndex={disabled ? -1 : 0}
@@ -82,7 +69,7 @@ export function SlideToConfirm({
       <div className="slider__fill" />
       <div className="slider__label">{label}</div>
       <div className="slider__knob">
-        <Icon name="arrowRight" size={24} stroke={2.4} />
+        <Icon name="chevronRight" size={26} stroke={2.6} />
       </div>
     </div>
   );

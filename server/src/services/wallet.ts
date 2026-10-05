@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { type Db, type Queryable, withTx } from '../db/pool.js';
+import type { TokenSigner } from '../auth/tokens.js';
+import { type Db, isUniqueViolation, type Queryable, withTx } from '../db/pool.js';
 import type { AssetConfig, AssetRegistry } from '../domain/assets.js';
+import { convertUnits, formatDecimal, SCALE } from '../domain/decimal.js';
 import { AppError } from '../domain/errors.js';
 import { formatAmount, InvalidAmountError, parseAmount } from '../domain/money.js';
 import {
@@ -11,6 +13,7 @@ import {
 } from '../providers/types.js';
 import { getOrCreateSystemAccount, getOrCreateUserAccount, postTransaction, SYSTEM } from './ledger.js';
 import { verifyPin } from './pin.js';
+import type { RatesService } from './rates.js';
 
 export interface Notifier {
   notify(userId: number, text: string): Promise<void>;
@@ -25,6 +28,14 @@ export interface Logger {
 export const DEPOSIT_TTL_SEC = 60 * 60;
 export const MAX_OPEN_DEPOSITS = 5;
 export const WITHDRAW_MAX_ATTEMPTS = 5;
+export const QUOTE_TTL_SEC = 30;
+
+/** Exchange settings: market rates, the signer for locked quotes, and the spread in basis points. */
+export interface FxOptions {
+  rates: RatesService;
+  signer: TokenSigner;
+  feeBps: number;
+}
 
 type DepositStatus = 'created' | 'pending' | 'paid' | 'expired' | 'failed';
 type WithdrawalStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'review';
@@ -49,10 +60,35 @@ interface WithdrawalRow {
   amount: string;
   fee: string;
   status: WithdrawalStatus;
+  payout_asset: string;
+  payout_amount: string;
   failure_reason: string | null;
   attempts: number;
   completed_at: Date | null;
   created_at: Date;
+}
+
+interface ExchangeRow {
+  id: string;
+  user_id: string;
+  from_asset: string;
+  to_asset: string;
+  from_amount: string;
+  to_amount: string;
+  fee: string;
+  rate: string;
+  created_at: Date;
+}
+
+interface QuotePayload {
+  q: string; // quote id
+  u: number;
+  f: string;
+  t: string;
+  a: string; // from amount, minor units
+  g: string; // gross to amount
+  n: string; // net to amount (credited)
+  r: string; // display rate
 }
 
 export interface DepositView {
@@ -74,6 +110,9 @@ export interface WithdrawalView {
   amount: string;
   fee: string;
   total: string;
+  /** What the user receives in @CryptoBot (fiat is paid out in crypto at the market rate). */
+  payoutAsset: string;
+  payoutAmount: string;
   /** Public status: 'review' is an internal state and is shown as 'processing'. */
   status: Exclude<WithdrawalStatus, 'review' | 'pending'>;
   failureReason: string | null;
@@ -81,7 +120,32 @@ export interface WithdrawalView {
   createdAt: string;
 }
 
-export type HistoryItem = DepositView | WithdrawalView;
+export interface ExchangeView {
+  id: string;
+  type: 'exchange';
+  status: 'completed';
+  fromAsset: string;
+  fromAmount: string;
+  toAsset: string;
+  toAmount: string;
+  fee: string;
+  rate: string;
+  createdAt: string;
+}
+
+export interface ExchangeQuote {
+  quoteToken: string;
+  fromAsset: string;
+  toAsset: string;
+  fromAmount: string;
+  toAmount: string;
+  fee: string;
+  feePercent: string;
+  rate: string;
+  expiresAt: string;
+}
+
+export type HistoryItem = DepositView | WithdrawalView | ExchangeView;
 
 const USER_FACING_FAILURES: Record<string, string> = {
   INSUFFICIENT_FUNDS: 'Сервис временно не может провести вывод. Средства возвращены на баланс',
@@ -95,6 +159,7 @@ export class WalletService {
     private readonly provider: PaymentProvider,
     private readonly notifier: Notifier,
     private readonly log: Logger,
+    private readonly fx: FxOptions,
   ) {}
 
   // ───────────────────────────── helpers ─────────────────────────────
@@ -133,6 +198,12 @@ export class WalletService {
     return this.assets.format(asset, BigInt(v));
   }
 
+  /** "1250.5 ₽" for messages. */
+  private money(asset: string, v: string | bigint): string {
+    const a = this.assets.catalog(asset);
+    return `${this.fmt(asset, v)} ${a?.symbol ?? asset}`;
+  }
+
   private depositView(r: DepositRow): DepositView {
     return {
       id: r.id,
@@ -157,6 +228,8 @@ export class WalletService {
       amount: this.fmt(r.asset, amount),
       fee: this.fmt(r.asset, fee),
       total: this.fmt(r.asset, amount + fee),
+      payoutAsset: r.payout_asset,
+      payoutAmount: this.fmt(r.payout_asset, r.payout_amount),
       status: r.status === 'review' || r.status === 'pending' ? 'processing' : r.status,
       failureReason: r.status === 'failed' ? (r.failure_reason ?? 'Вывод отклонён') : null,
       completedAt: r.completed_at?.toISOString() ?? null,
@@ -202,8 +275,10 @@ export class WalletService {
       invoice = await this.provider.createInvoice({
         asset: a.code,
         amount: formatAmount(amount, a.decimals),
+        fiat: a.kind === 'fiat',
+        acceptedAssets: a.kind === 'fiat' ? ['USDT', 'TON'] : undefined,
         payload: id,
-        description: `Пополнение Tonum Wallet на ${formatAmount(amount, a.decimals)} ${a.code}`,
+        description: `Пополнение Tonum Wallet на ${this.money(a.code, amount)}`,
         expiresInSec: DEPOSIT_TTL_SEC,
       });
     } catch (err) {
@@ -298,7 +373,7 @@ export class WalletService {
     this.log.info({ depositId: credited.id }, 'deposit credited');
     await this.safeNotify(
       Number(credited.user_id),
-      `✅ Пополнение на ${this.fmt(credited.asset, credited.amount)} ${credited.asset} зачислено`,
+      `✅ Пополнение на ${this.money(credited.asset, credited.amount)} зачислено`,
     );
     return true;
   }
@@ -352,6 +427,8 @@ export class WalletService {
     const existing = await this.findWithdrawalByKey(this.db, userId, idempotencyKey);
     if (existing) return this.replayWithdrawal(existing, a.code, amount);
 
+    const payout = await this.payoutFor(a, amount);
+
     const created = await withTx(this.db, async (c) => {
       const userAcc = await getOrCreateUserAccount(c, userId, a.code);
       // Row lock serializes this user's withdrawals so the daily limit check is exact.
@@ -378,11 +455,21 @@ export class WalletService {
 
       const id = randomUUID();
       const ins = await c.query<WithdrawalRow>(
-        `INSERT INTO withdrawals (id, user_id, asset, amount, fee, status, provider, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)
+        `INSERT INTO withdrawals (id, user_id, asset, amount, fee, status, provider, idempotency_key, payout_asset, payout_amount)
+         VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, $9)
          ON CONFLICT (user_id, idempotency_key) DO NOTHING
          RETURNING *`,
-        [id, userId, a.code, amount.toString(), fee.toString(), this.provider.name, idempotencyKey],
+        [
+          id,
+          userId,
+          a.code,
+          amount.toString(),
+          fee.toString(),
+          this.provider.name,
+          idempotencyKey,
+          payout.asset,
+          payout.amount.toString(),
+        ],
       );
       if (ins.rowCount === 0) return null;
 
@@ -406,6 +493,22 @@ export class WalletService {
     this.log.info({ withdrawalId: created.id, userId, asset: a.code }, 'withdrawal created');
     await this.processWithdrawal(created.id);
     return this.withdrawalView((await this.getWithdrawalRow(this.db, created.id))!);
+  }
+
+  /**
+   * What actually leaves through the provider. Crypto goes out as is; fiat is converted to its
+   * payout asset (USDT) at the market rate minus the exchange spread, rounded down.
+   */
+  private async payoutFor(a: AssetConfig, amount: bigint): Promise<{ asset: string; amount: bigint }> {
+    if (a.payoutAsset === a.code) return { asset: a.code, amount };
+    const out = this.assets.catalog(a.payoutAsset)!;
+    const [pa, po] = await Promise.all([this.fx.rates.price(a.code), this.fx.rates.price(out.code)]);
+    const gross = convertUnits(amount, { decimals: a.decimals, price: pa }, { decimals: out.decimals, price: po });
+    const step = 10n ** BigInt(out.decimals - out.inputDecimals);
+    let net = gross - (gross * BigInt(this.fx.feeBps)) / 10_000n;
+    net -= net % step;
+    if (net <= 0n) throw new AppError('AMOUNT_TOO_SMALL', 'Сумма слишком мала для вывода');
+    return { asset: out.code, amount: net };
   }
 
   private replayWithdrawal(row: WithdrawalRow, asset: string, amount: bigint): WithdrawalView {
@@ -451,18 +554,18 @@ export class WalletService {
     const w = claim.rows[0];
     if (!w) return; // completed, failed, or claimed by another worker
 
-    const a = this.asset(w.asset);
+    const out = this.assets.catalog(w.payout_asset)!;
     const transferInput = {
       telegramUserId: Number(w.user_id),
-      asset: w.asset,
-      amount: formatAmount(BigInt(w.amount), a.decimals),
+      asset: out.code,
+      amount: formatAmount(BigInt(w.payout_amount), out.decimals),
       spendId: w.id,
       comment: 'Вывод из Tonum Wallet',
     };
 
     try {
       if (w.attempts > 1) {
-        const prior = await this.provider.findTransfer(w.id, w.asset);
+        const prior = await this.provider.findTransfer(w.id, w.payout_asset);
         if (prior) return await this.completeWithdrawal(w, prior);
       }
       const transfer = await this.provider.transfer(transferInput);
@@ -471,7 +574,7 @@ export class WalletService {
       if (err instanceof ProviderRejectedError) {
         try {
           // After an earlier unknown outcome the rejection may just mean "already sent".
-          const prior = w.attempts > 1 ? await this.provider.findTransfer(w.id, w.asset) : null;
+          const prior = w.attempts > 1 ? await this.provider.findTransfer(w.id, w.payout_asset) : null;
           if (prior) return await this.completeWithdrawal(w, prior);
           await this.failWithdrawal(w, err.reason);
         } catch (lookupErr) {
@@ -498,7 +601,7 @@ export class WalletService {
     );
     if (res.rowCount === 0) return;
     this.log.info({ withdrawalId: w.id }, 'withdrawal completed');
-    await this.safeNotify(Number(w.user_id), `💸 Вывод ${this.fmt(w.asset, w.amount)} ${w.asset} выполнен — средства в @CryptoBot`);
+    await this.safeNotify(Number(w.user_id), `💸 Вывод ${this.money(w.asset, w.amount)} выполнен — ${this.money(w.payout_asset, w.payout_amount)} в @CryptoBot`);
   }
 
   private async failWithdrawal(w: WithdrawalRow, reason: string): Promise<void> {
@@ -528,7 +631,7 @@ export class WalletService {
     this.log.warn({ withdrawalId: w.id, reason }, 'withdrawal rejected and refunded');
     await this.safeNotify(
       Number(w.user_id),
-      `↩️ Вывод ${this.fmt(w.asset, w.amount)} ${w.asset} не выполнен. Средства возвращены на баланс`,
+      `↩️ Вывод ${this.money(w.asset, w.amount)} не выполнен. Средства возвращены на баланс`,
     );
   }
 
@@ -571,34 +674,184 @@ export class WalletService {
       }
     }
 
-    const res = await this.db.query<{ type: 'deposit' | 'withdrawal'; id: string; ts: string }>(
-      `SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS ts FROM (
-         SELECT 'deposit' AS type, id, user_id, asset, amount, 0::bigint AS fee, status, NULL::text AS failure_reason,
-                0 AS attempts, paid_at, NULL::timestamptz AS completed_at, expires_at, NULL::text AS pay_url,
-                NULL::text AS provider_invoice_id, created_at
-         FROM deposits WHERE user_id = $1 AND status = 'paid'
+    // Page over the ids of all three kinds of operations, then load the full rows.
+    const page = await this.db.query<{ type: 'deposit' | 'withdrawal' | 'exchange'; id: string; ts: string }>(
+      `SELECT type, id, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS ts FROM (
+         SELECT 'deposit' AS type, id, created_at FROM deposits WHERE user_id = $1 AND status = 'paid'
          UNION ALL
-         SELECT 'withdrawal', id, user_id, asset, amount, fee, status, failure_reason,
-                attempts, NULL, completed_at, NULL, NULL, NULL, created_at
-         FROM withdrawals WHERE user_id = $1
+         SELECT 'withdrawal', id, created_at FROM withdrawals WHERE user_id = $1
+         UNION ALL
+         SELECT 'exchange', id, created_at FROM exchanges WHERE user_id = $1
        ) t
        WHERE $2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid)
        ORDER BY created_at DESC, id DESC
        LIMIT $4`,
       [userId, cursorTs, cursorId, opts.limit + 1],
     );
+    const rows = page.rows.slice(0, opts.limit);
+    const ids = (type: string) => rows.filter((r) => r.type === type).map((r) => r.id);
+    const [deps, wds, exs] = await Promise.all([
+      this.db.query<DepositRow>(`SELECT * FROM deposits WHERE id = ANY($1::uuid[])`, [ids('deposit')]),
+      this.db.query<WithdrawalRow>(`SELECT * FROM withdrawals WHERE id = ANY($1::uuid[])`, [ids('withdrawal')]),
+      this.db.query<ExchangeRow>(`SELECT * FROM exchanges WHERE id = ANY($1::uuid[])`, [ids('exchange')]),
+    ]);
+    const views = new Map<string, HistoryItem>();
+    for (const r of deps.rows) views.set(r.id, this.depositView(r));
+    for (const r of wds.rows) views.set(r.id, this.withdrawalView(r));
+    for (const r of exs.rows) views.set(r.id, this.exchangeView(r));
+    const items = rows.map((r) => views.get(r.id)).filter((v): v is HistoryItem => Boolean(v));
 
-    const rows = res.rows.slice(0, opts.limit);
-    const items = rows.map((r) =>
-      r.type === 'deposit'
-        ? this.depositView(r as unknown as DepositRow)
-        : this.withdrawalView(r as unknown as WithdrawalRow),
-    );
     const last = rows[rows.length - 1];
     // The cursor carries a microsecond-exact timestamp: JS Dates only keep milliseconds.
     const nextCursor =
-      res.rows.length > opts.limit && last ? Buffer.from(`${last.ts}|${last.id}`).toString('base64url') : null;
+      page.rows.length > opts.limit && last ? Buffer.from(`${last.ts}|${last.id}`).toString('base64url') : null;
     return { items, nextCursor };
+  }
+
+  // ─────────────────────────────── exchange ───────────────────────────────
+
+  private exchangeView(r: ExchangeRow): ExchangeView {
+    return {
+      id: r.id,
+      type: 'exchange',
+      status: 'completed',
+      fromAsset: r.from_asset,
+      fromAmount: this.fmt(r.from_asset, r.from_amount),
+      toAsset: r.to_asset,
+      toAmount: this.fmt(r.to_asset, r.to_amount),
+      fee: this.fmt(r.to_asset, r.fee),
+      rate: r.rate,
+      createdAt: r.created_at.toISOString(),
+    };
+  }
+
+  /** Market prices in USD for every enabled currency, for display (total balance, rate hints). */
+  async marketPrices(): Promise<Record<string, string>> {
+    const prices = await this.fx.rates.prices();
+    const out: Record<string, string> = {};
+    // Payout assets (USDT) too, so the app can estimate what a fiat withdrawal pays out.
+    const codes = new Set([...this.assets.list().map((a) => a.code), ...this.assets.list().map((a) => a.payoutAsset)]);
+    for (const code of codes) {
+      const p = prices.get(code);
+      if (p) out[code] = formatDecimal(p, 10);
+    }
+    return out;
+  }
+
+  /**
+   * Prices an exchange and locks it for QUOTE_TTL_SEC in a signed token, so the user confirms
+   * exactly the numbers they saw. The spread is shown separately as a fee in the target currency.
+   */
+  async quoteExchange(userId: number, fromCode: string, toCode: string, amountStr: string): Promise<ExchangeQuote> {
+    const from = this.asset(fromCode);
+    const to = this.asset(toCode);
+    if (from.code === to.code) throw new AppError('SAME_CURRENCY', 'Выберите разные валюты');
+    const amount = this.parse(from, amountStr);
+    if (amount < from.minExchange) {
+      throw new AppError('AMOUNT_TOO_SMALL', `Минимум для обмена — ${this.money(from.code, from.minExchange)}`, {
+        min: formatAmount(from.minExchange, from.decimals),
+      });
+    }
+
+    const [pf, pt] = await Promise.all([this.fx.rates.price(from.code), this.fx.rates.price(to.code)]);
+    const gross = convertUnits(amount, { decimals: from.decimals, price: pf }, { decimals: to.decimals, price: pt });
+    const fee = (gross * BigInt(this.fx.feeBps) + 9_999n) / 10_000n; // rounded up: never undercharge
+    const net = gross - fee;
+    if (net <= 0n) throw new AppError('AMOUNT_TOO_SMALL', 'Сумма слишком мала для обмена');
+
+    const rate = (pf * SCALE) / pt;
+    const digits = rate >= 100n * SCALE ? 2 : rate >= SCALE ? 4 : 6;
+    const payload: QuotePayload = {
+      q: randomUUID(),
+      u: userId,
+      f: from.code,
+      t: to.code,
+      a: amount.toString(),
+      g: gross.toString(),
+      n: net.toString(),
+      r: formatDecimal(rate, digits),
+    };
+    const token = this.fx.signer.sign('quote', payload, QUOTE_TTL_SEC);
+    const exp = this.fx.signer.verify<QuotePayload>('quote', token)!.exp;
+    return {
+      quoteToken: token,
+      fromAsset: from.code,
+      toAsset: to.code,
+      fromAmount: formatAmount(amount, from.decimals),
+      toAmount: formatAmount(net, to.decimals),
+      fee: formatAmount(fee, to.decimals),
+      feePercent: formatDecimal((BigInt(this.fx.feeBps) * SCALE) / 100n, 2),
+      rate: payload.r,
+      expiresAt: new Date(exp).toISOString(),
+    };
+  }
+
+  /** Executes a quote atomically: both legs and the fee post in one balanced ledger transaction. */
+  async executeExchange(userId: number, quoteToken: string, idempotencyKey: string): Promise<ExchangeView> {
+    const existing = await this.db.query<ExchangeRow>(
+      `SELECT * FROM exchanges WHERE user_id = $1 AND idempotency_key = $2`,
+      [userId, idempotencyKey],
+    );
+    if (existing.rows[0]) return this.exchangeView(existing.rows[0]);
+
+    const q = this.fx.signer.verify<QuotePayload>('quote', quoteToken);
+    if (!q) throw new AppError('QUOTE_EXPIRED', 'Курс обновился — проверьте сумму и подтвердите ещё раз');
+    if (q.u !== userId) throw new AppError('FORBIDDEN', 'Чужая котировка');
+    const from = this.asset(q.f);
+    const to = this.asset(q.t);
+    const amount = BigInt(q.a);
+    const gross = BigInt(q.g);
+    const net = BigInt(q.n);
+    const fee = gross - net;
+
+    let row: ExchangeRow;
+    try {
+      row = await withTx(this.db, async (c) => {
+        const userFrom = await getOrCreateUserAccount(c, userId, from.code);
+        const userTo = await getOrCreateUserAccount(c, userId, to.code);
+        const bal = await c.query<{ balance: string }>(`SELECT balance FROM accounts WHERE id = $1 FOR UPDATE`, [userFrom]);
+        if (BigInt(bal.rows[0]!.balance) < amount) {
+          throw new AppError('INSUFFICIENT_FUNDS', 'Недостаточно средств для обмена');
+        }
+        const id = randomUUID();
+        const ins = await c.query<ExchangeRow>(
+          `INSERT INTO exchanges (id, user_id, from_asset, to_asset, from_amount, to_amount, fee, rate, quote_id, idempotency_key)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          [id, userId, from.code, to.code, amount.toString(), net.toString(), fee.toString(), q.r, q.q, idempotencyKey],
+        );
+        const deskFrom = await getOrCreateSystemAccount(c, SYSTEM.exchange, from.code);
+        const deskTo = await getOrCreateSystemAccount(c, SYSTEM.exchange, to.code);
+        const postings = [
+          { accountId: userFrom, amount: -amount },
+          { accountId: deskFrom, amount, allowNegative: true },
+          { accountId: deskTo, amount: -gross, allowNegative: true },
+          { accountId: userTo, amount: net },
+        ];
+        if (fee > 0n) {
+          postings.push({ accountId: await getOrCreateSystemAccount(c, SYSTEM.fees, to.code), amount: fee, allowNegative: true });
+        }
+        await postTransaction(c, 'exchange', id, postings);
+        return ins.rows[0]!;
+      });
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      // A concurrent request won the race. Which unique index fires first is up to Postgres,
+      // so look up by idempotency key before deciding that the quote was reused.
+      const again = await this.db.query<ExchangeRow>(
+        `SELECT * FROM exchanges WHERE user_id = $1 AND idempotency_key = $2`,
+        [userId, idempotencyKey],
+      );
+      if (again.rows[0]) return this.exchangeView(again.rows[0]);
+      throw new AppError('QUOTE_EXPIRED', 'Этот обмен уже выполнен. Запросите новый курс');
+    }
+    this.log.info({ exchangeId: row.id, userId, from: from.code, to: to.code }, 'exchange completed');
+    return this.exchangeView(row);
+  }
+
+  async getExchange(userId: number, id: string): Promise<ExchangeView> {
+    const r = await this.db.query<ExchangeRow>(`SELECT * FROM exchanges WHERE id = $1 AND user_id = $2`, [id, userId]);
+    if (!r.rows[0]) throw new AppError('NOT_FOUND', 'Обмен не найден');
+    return this.exchangeView(r.rows[0]);
   }
 
   private async safeNotify(userId: number, text: string): Promise<void> {

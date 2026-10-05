@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type {
   CreateInvoiceInput,
+  ExchangeRate,
   PaymentProvider,
   ProviderInvoice,
   ProviderTransfer,
@@ -61,4 +62,17 @@ export class MockProvider implements PaymentProvider {
   async findTransfer(spendId: string): Promise<ProviderTransfer | null> {
     return this.transfers.get(spendId) ?? null;
   }
+
+  /** Plausible fixed market rates for local development. */
+  async getRates(): Promise<ExchangeRate[]> {
+    return MOCK_RATES.map((r) => ({ ...r }));
+  }
 }
+
+export const MOCK_RATES: ExchangeRate[] = [
+  { source: 'USDT', target: 'USD', rate: '1' },
+  { source: 'USDT', target: 'EUR', rate: '0.92' },
+  { source: 'USDT', target: 'RUB', rate: '92.5' },
+  { source: 'USDT', target: 'CNY', rate: '7.25' },
+  { source: 'TON', target: 'USD', rate: '5.2' },
+];

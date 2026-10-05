@@ -4,8 +4,12 @@
  */
 
 export interface CreateInvoiceInput {
+  /** Invoice currency: a crypto asset, or a fiat code when `fiat` is set. */
   asset: string;
   amount: string;
+  /** Fiat-denominated invoice: the payer pays the equivalent in one of `acceptedAssets`. */
+  fiat?: boolean;
+  acceptedAssets?: string[];
   /** Our deposit id; echoed back by the provider so we can match payments. */
   payload: string;
   description: string;
@@ -15,6 +19,7 @@ export interface CreateInvoiceInput {
 export interface ProviderInvoice {
   invoiceId: string;
   status: 'active' | 'paid' | 'expired';
+  /** Invoice currency (fiat code for fiat invoices). */
   asset: string;
   amount: string;
   payload?: string;
@@ -49,6 +54,13 @@ export class ProviderRejectedError extends Error {
 /** Network error, timeout or 5xx: the outcome is unknown and must be reconciled. */
 export class ProviderUnavailableError extends Error {}
 
+/** 1 `source` = `rate` `target`, e.g. USDT → RUB = 92.5 */
+export interface ExchangeRate {
+  source: string;
+  target: string;
+  rate: string;
+}
+
 export interface PaymentProvider {
   readonly name: string;
   createInvoice(input: CreateInvoiceInput): Promise<ProviderInvoice>;
@@ -56,4 +68,5 @@ export interface PaymentProvider {
   transfer(input: TransferInput): Promise<ProviderTransfer>;
   /** Looks up a transfer by idempotency key; null if the provider never executed it. */
   findTransfer(spendId: string, asset: string): Promise<ProviderTransfer | null>;
+  getRates(): Promise<ExchangeRate[]>;
 }

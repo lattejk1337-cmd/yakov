@@ -64,6 +64,9 @@ export const telegram = {
   get firstName(): string | undefined {
     return tg?.initDataUnsafe.user?.first_name;
   },
+  get platform(): string {
+    return tg?.platform ?? 'web';
+  },
 
   init(colors: { bg: string }) {
     if (!inTelegram) return;

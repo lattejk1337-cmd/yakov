@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { existsSync } from 'node:fs';
 import type { TelegramUser } from '../auth/telegram.js';
+import type { TokenSigner } from '../auth/tokens.js';
 import type { Config } from '../config.js';
 import type { Db } from '../db/pool.js';
 import type { AssetRegistry } from '../domain/assets.js';
@@ -28,6 +29,7 @@ export interface AppDeps {
   assets: AssetRegistry;
   provider: PaymentProvider;
   wallet: WalletService;
+  signer: TokenSigner;
   /** Telegram bot update handler, mounted as a webhook when BOT_MODE=webhook. */
   handleTelegramUpdate?: (update: unknown) => Promise<void>;
   staticDir?: string;
@@ -52,7 +54,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", 'https://telegram.org'],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'https://t.me', 'https://*.telegram.org'],
+        // Telegram profile photos redirect from t.me to changing CDN hosts.
+        imgSrc: ["'self'", 'data:', 'https:'],
         fontSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         formAction: ["'self'"],
