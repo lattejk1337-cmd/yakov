@@ -838,14 +838,14 @@ def build_materials():
     blockvar = br.outputs['Color']
     mortar = br.outputs['Fac']
     n1 = b.noise(o, scale=2.2, detail=8, rough=0.6)
-    stone = b.ramp(n1.outputs['Fac'], [(0.25, '#1d1d24'), (0.5, '#3a3840'), (0.75, '#4d4a4c')])
+    stone = b.ramp(n1.outputs['Fac'], [(0.25, '#5e5a64'), (0.5, '#7c7882'), (0.75, '#938e8c')])
     stone_c = b.mix(stone.outputs[0], blockvar, 0.35, 'MULTIPLY')
     # потёки грязи (вертикальные)
     streak_v = b.mapping(o, scale=(3.0, 3.0, 0.15))
     streak = b.noise(streak_v, scale=4, detail=4)
-    grime = b.ramp(streak.outputs['Fac'], [(0.45, '#ffffff'), (0.7, '#3c3c3c')])
+    grime = b.ramp(streak.outputs['Fac'], [(0.45, '#ffffff'), (0.7, '#7a7a7a')])
     stone_c = b.mix(stone_c, grime.outputs[0], 0.7, 'MULTIPLY')
-    base = b.mix(stone_c, '#0b0a0c', mortar)
+    base = b.mix(stone_c, '#2e2a2a', mortar)
     pits = b.noise(o, scale=28, detail=10, rough=0.7)
     h = b.math('ADD', b.math('MULTIPLY', b.math('SUBTRACT', 1.0, mortar), 0.6), b.math('MULTIPLY', pits.outputs['Fac'], 0.4))
     wet = b.ramp(b.noise(o, scale=0.6, detail=3).outputs['Fac'], [(0.45, (0.9, 0.9, 0.9)), (0.6, (0.35, 0.35, 0.35))])
@@ -860,9 +860,9 @@ def build_materials():
     n1 = b.noise(o, scale=3.5, detail=9, rough=0.62)
     vor = b.voronoi(o, scale=6.0, feature='DISTANCE_TO_EDGE')
     cracks = b.ramp(vor.outputs['Distance'], [(0.0, '#000000'), (0.035, '#ffffff')])
-    col = b.ramp(n1.outputs['Fac'], [(0.3, '#24232a'), (0.55, '#45434a'), (0.8, '#5c5856')])
+    col = b.ramp(n1.outputs['Fac'], [(0.3, '#6a6670'), (0.55, '#88848c'), (0.8, '#a09a94')])
     st = b.noise(b.mapping(o, scale=(5, 5, 0.25)), scale=3, detail=3)
-    grime = b.ramp(st.outputs['Fac'], [(0.4, '#ffffff'), (0.75, '#4a4a4a')])
+    grime = b.ramp(st.outputs['Fac'], [(0.4, '#ffffff'), (0.75, '#808080')])
     c2 = b.mix(col.outputs[0], grime.outputs[0], 0.8, 'MULTIPLY')
     c3 = b.mix(c2, cracks.outputs[0], 0.6, 'MULTIPLY')
     det = b.noise(o, scale=40, detail=8)
@@ -879,7 +879,7 @@ def build_materials():
     mossn = b.noise(o, scale=6, detail=8, rough=0.7)
     moss_mask = b.math('MULTIPLY', b.math('MAXIMUM', up, 0.0), mossn.outputs['Fac'])
     mm = b.ramp(moss_mask, [(0.25, '#000000'), (0.45, '#ffffff')])
-    col = b.ramp(b.noise(o, scale=4, detail=8).outputs['Fac'], [(0.3, '#2a2a2e'), (0.7, '#55524f')])
+    col = b.ramp(b.noise(o, scale=4, detail=8).outputs['Fac'], [(0.3, '#5a5a60'), (0.7, '#8a8680')])
     lich = b.ramp(b.voronoi(o, scale=18).outputs['Distance'], [(0.0, '#6b6b55'), (0.15, '#ffffff')])
     c2 = b.mix(col.outputs[0], lich.outputs[0], 0.5, 'MULTIPLY')
     c3 = b.mix(c2, '#18240f', mm.outputs[0])
@@ -904,7 +904,7 @@ def build_materials():
     wv.inputs['Detail Scale'].default_value = 1.6
     veins = b.ramp(wv.outputs['Fac'], [(0.0, '#000000'), (0.06, '#ffffff')])
     white = b.mix('#7a7a80', '#d9d6d2', veins.outputs[0])
-    black = b.mix('#7b6b7f', '#050506', veins.outputs[0])
+    black = b.mix('#7b6b7f', '#141218', veins.outputs[0])
     marble = b.mix(black, white, tile)
     br = b.n('ShaderNodeTexBrick', Scale=1.0)
     b.l(o, br.inputs['Vector'])
@@ -930,7 +930,7 @@ def build_materials():
     vor = b.voronoi(b.mapping(o, scale=(1, 1.35, 1)), scale=4.5, feature='F1', rand=0.85)
     edge = b.voronoi(b.mapping(o, scale=(1, 1.35, 1)), scale=4.5, feature='DISTANCE_TO_EDGE', rand=0.85)
     gap = b.ramp(edge.outputs['Distance'], [(0.0, '#000000'), (0.07, '#ffffff')])
-    cellc = b.ramp(b.sep(vor.outputs['Color'])[0], [(0.0, '#1a1a1e'), (0.5, '#2e2c30'), (1.0, '#3d3a39')])
+    cellc = b.ramp(b.sep(vor.outputs['Color'])[0], [(0.0, '#3a3a42'), (0.5, '#55525a'), (1.0, '#6a6662')])
     dirt = b.noise(o, scale=3, detail=8)
     stone = b.mix(cellc.outputs[0], dirt.outputs['Color'], 0.15, 'MULTIPLY')
     base = b.mix('#060504', stone, gap.outputs[0])
@@ -1190,7 +1190,7 @@ def build_materials():
     b.l(b.mapping(o, scale=(6, 6, 0.6)), wv.inputs['Vector'])
     wv.inputs['Distortion'].default_value = 8
     wv.inputs['Detail'].default_value = 6
-    col = b.ramp(wv.outputs['Fac'], [(0.2, '#0a0806'), (0.8, '#2a2420')])
+    col = b.ramp(wv.outputs['Fac'], [(0.2, '#1e1a16'), (0.8, '#4a423a')])
     b.output(b.bsdf(Base_Color=col.outputs[0], Roughness=0.9, Normal=b.bump(wv.outputs['Fac'], 0.8, 0.03)))
 
     # ── чёрная дыра ──────────────────────────────────────────────────
@@ -3244,20 +3244,26 @@ def build_lights(lamps):
     # внутри: свечи у алтаря
     for i, (p, e) in enumerate((((-1.05, 37.0, 2.4), 45), ((1.05, 37.0, 2.4), 45), ((0.0, 35.6, 1.0), 40),
                                 ((-2.5, 36.0, 0.6), 30), ((2.5, 36.0, 0.6), 30), ((0.0, 38.4, 2.2), 25))):
-        l = add_light("Candle_%d" % i, 'POINT', p, e, '#ff7a28', 0.15)
-        flicker(l, e, 0.3, 10.0, 20 + i)
+        l = add_light("Candle_%d" % i, 'POINT', p, e * 4, '#ff7a28', 0.15)
+        flicker(l, e * 4, 0.3, 10.0, 20 + i)
     for i, y in enumerate(COL_Y[::2]):
         for sx in (-1, 1):
-            l = add_light("ColCandle_%d_%d" % (i, sx), 'POINT', (sx * (NAVE_X - 0.9), y, 0.7), 12, '#ff7a28', 0.2)
-            flicker(l, 12, 0.3, 10.0, 40 + i * 2 + sx)
+            l = add_light("ColCandle_%d_%d" % (i, sx), 'POINT', (sx * (NAVE_X - 0.9), y, 0.7), 80, '#ff7a28', 0.2)
+            flicker(l, 80, 0.3, 10.0, 40 + i * 2 + sx)
     # лучи из окон клерестори (через объёмный туман)
-    for i, y in enumerate([7.5, 17.5, 27.5]):
+    for i, y in enumerate([7.5, 12.5, 17.5, 22.5, 27.5, 32.5]):
+        sx = -1 if i % 2 else 1
+        s = add_light("GodRay_%d" % i, 'SPOT', (sx * 9.5, y, 31.0), 120000, '#9a8aff', 0.05,
+                      spot=(math.radians(9), 0.25))
+        aim(s, (sx * -1.2, y + 1.0, 0.0))
+    # мягкий заполняющий под сводами (видно колонны и нервюры)
+    for i, y in enumerate((6.0, 14.0, 22.0, 30.0, 37.0)):
+        add_light("VaultFill_%d" % i, 'POINT', (0.0, y, 14.0), 4000, '#5a48ff', 2.5, shadow=False)
         for sx in (-1, 1):
-            s = add_light("GodRay_%d_%d" % (i, sx), 'SPOT', (sx * 14.0, y + 3.0, 26.0), 9000, '#8a7aff', 0.05,
-                          spot=(math.radians(14), 0.3))
-            aim(s, (sx * -1.5, y - 1.0, 0.0))
+            add_light("AisleFill_%d_%d" % (i, sx), 'POINT', (sx * 7.0, y, 6.0), 700, '#ff5a8a' if i % 2 else '#6a5aff', 1.5,
+                      shadow=False)
     # роза: сзади светит внутрь
-    rs = add_light("RoseBeam", 'SPOT', (0, -9.0, 19.0), 25000, '#7a3ad0', 0.2, spot=(math.radians(26), 0.4))
+    rs = add_light("RoseBeam", 'SPOT', (0, -9.0, 19.0), 150000, '#7a3ad0', 0.2, spot=(math.radians(26), 0.4))
     aim(rs, (0, 22.0, 2.0))
     # ключ на стакане + контровые
     k = add_light("CupKey", 'AREA', CUP_POS + Vector((-0.35, -0.3, 0.55)), 6.0, '#ffd8c0', 0.35)
@@ -3267,9 +3273,9 @@ def build_lights(lamps):
     k = add_light("CupTop", 'AREA', CUP_POS + Vector((0.0, 0.1, 0.9)), 3.0, '#ffb0ff', 0.2)
     aim(k, CUP_POS)
     # персонажи: маджента сзади + циан заполняющий
-    k = add_light("CharRim", 'SPOT', (-1.4, 34.5, 3.2), 900, '#ff2a8a', 0.3, spot=(math.radians(35), 0.6))
+    k = add_light("CharRim", 'SPOT', (-1.4, 34.5, 3.2), 4000, '#ff2a8a', 0.3, spot=(math.radians(35), 0.6))
     aim(k, (-0.4, 30.8, 1.4))
-    k = add_light("CharFill", 'SPOT', (2.2, 27.0, 2.2), 500, '#6ad0ff', 0.4, spot=(math.radians(40), 0.8))
+    k = add_light("CharFill", 'SPOT', (2.2, 27.0, 2.2), 2500, '#6ad0ff', 0.4, spot=(math.radians(40), 0.8))
     aim(k, (-0.2, 30.8, 1.5))
     k = add_light("YardRim", 'SPOT', (4.5, -12.0, 3.5), 1500, '#ff3a6a', 0.4, spot=(math.radians(40), 0.7))
     aim(k, (1.5, -19.0, 1.4))
