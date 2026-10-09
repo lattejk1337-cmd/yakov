@@ -1277,7 +1277,7 @@ def build_materials():
     vol = b.n('ShaderNodeVolumePrincipled')
     vol.inputs['Color'].default_value = hexcol('#a8a0c0')
     vol.inputs['Anisotropy'].default_value = 0.6
-    b.l(b.math('MULTIPLY', b.math('ADD', 0.3, nz.outputs['Fac']), 0.022), vol.inputs['Density'])
+    b.l(b.math('MULTIPLY', b.math('ADD', 0.3, nz.outputs['Fac']), 0.012), vol.inputs['Density'])
     b.output(None, volume=vol)
 
     m = new_mat("LanternGlass")
@@ -3218,6 +3218,13 @@ def build_lights(lamps):
     aim(sun, -BH_POS * 0.01)
     sun.rotation_euler = (BH_POS * -1).to_track_quat('Z', 'Y').to_euler()
     sun.rotation_euler = (-(Vector((0, 0, 0)) - BH_POS)).to_track_quat('Z', 'Y').to_euler()
+    moon = add_light("Moon", 'SUN', (0, 0, 50), 3.0, '#8aa0ff', 0.03)
+    moon.rotation_euler = (math.radians(58), 0, math.radians(200))
+    # архитектурная подсветка фасада снизу
+    for i, (x, col) in enumerate(((-7.5, '#ff6a2a'), (0.0, '#8a4aff'), (7.5, '#ff6a2a'), (-12.0, '#6a3aff'), (12.0, '#6a3aff'))):
+        u = add_light("FacadeUp_%d" % i, 'SPOT', (x * 0.8, -9.0, 0.4), 40000 if i < 3 else 60000, col, 0.3,
+                      spot=(math.radians(38), 0.5))
+        aim(u, (x, -1.0, 22.0 if i < 3 else 34.0))
     # молния
     lt = add_light("Lightning", 'SUN', (0, 0, 60), 0.0, '#c8d4ff', 0.05)
     lt.rotation_euler = (math.radians(35), math.radians(-25), 0)
@@ -3232,8 +3239,8 @@ def build_lights(lamps):
     bake(lt.data, "energy", -1, frames, vals, interp='LINEAR')
     # фонари двора
     for i, p in enumerate(lamps):
-        l = add_light("Lantern_%d" % i, 'POINT', p, 60.0, '#ff8a30', 0.06)
-        flicker(l, 60.0, 0.25, 7.0, i)
+        l = add_light("Lantern_%d" % i, 'POINT', p, 250.0, '#ff8a30', 0.06)
+        flicker(l, 250.0, 0.25, 7.0, i)
     # внутри: свечи у алтаря
     for i, (p, e) in enumerate((((-1.05, 37.0, 2.4), 45), ((1.05, 37.0, 2.4), 45), ((0.0, 35.6, 1.0), 40),
                                 ((-2.5, 36.0, 0.6), 30), ((2.5, 36.0, 0.6), 30), ((0.0, 38.4, 2.2), 25))):
@@ -3250,7 +3257,7 @@ def build_lights(lamps):
                           spot=(math.radians(14), 0.3))
             aim(s, (sx * -1.5, y - 1.0, 0.0))
     # роза: сзади светит внутрь
-    rs = add_light("RoseBeam", 'SPOT', (0, -9.0, 19.0), 60000, '#c03a8a', 0.2, spot=(math.radians(28), 0.4))
+    rs = add_light("RoseBeam", 'SPOT', (0, -9.0, 19.0), 25000, '#7a3ad0', 0.2, spot=(math.radians(26), 0.4))
     aim(rs, (0, 22.0, 2.0))
     # ключ на стакане + контровые
     k = add_light("CupKey", 'AREA', CUP_POS + Vector((-0.35, -0.3, 0.55)), 6.0, '#ffd8c0', 0.35)
@@ -3260,11 +3267,11 @@ def build_lights(lamps):
     k = add_light("CupTop", 'AREA', CUP_POS + Vector((0.0, 0.1, 0.9)), 3.0, '#ffb0ff', 0.2)
     aim(k, CUP_POS)
     # персонажи: маджента сзади + циан заполняющий
-    k = add_light("CharRim", 'AREA', (-1.6, 33.0, 2.4), 260, '#ff2a8a', 1.2)
-    aim(k, (-0.4, 30.8, 1.5))
-    k = add_light("CharFill", 'AREA', (2.5, 27.5, 2.0), 60, '#3ac8ff', 1.5)
+    k = add_light("CharRim", 'SPOT', (-1.4, 34.5, 3.2), 900, '#ff2a8a', 0.3, spot=(math.radians(35), 0.6))
+    aim(k, (-0.4, 30.8, 1.4))
+    k = add_light("CharFill", 'SPOT', (2.2, 27.0, 2.2), 500, '#6ad0ff', 0.4, spot=(math.radians(40), 0.8))
     aim(k, (-0.2, 30.8, 1.5))
-    k = add_light("YardRim", 'AREA', (4.5, -12.0, 3.5), 300, '#ff3a6a', 2.0)
+    k = add_light("YardRim", 'SPOT', (4.5, -12.0, 3.5), 1500, '#ff3a6a', 0.4, spot=(math.radians(40), 0.7))
     aim(k, (1.5, -19.0, 1.4))
 
 
@@ -3300,7 +3307,7 @@ def build_world():
     flash = b.n('ShaderNodeValue')
     flash.name = "Flash"
     flash.outputs[0].default_value = 1.0
-    b.l(b.math('MULTIPLY', flash.outputs[0], 1.4), bg.inputs['Strength'])
+    b.l(b.math('MULTIPLY', flash.outputs[0], 3.0), bg.inputs['Strength'])
     b.l(bg.outputs[0], out.inputs['Surface'])
     frames, vals = [F0], [1.0]
     for lf in LIGHTNING:
