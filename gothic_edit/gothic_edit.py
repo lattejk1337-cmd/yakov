@@ -3662,7 +3662,7 @@ def build_compositor(sc, assets):
     L(cur, ex.inputs['Image'])
     expo = []
     for f in frames:
-        v = 0.0
+        v = 0.6     # базовая экспозиция (ночная сцена)
         for ff, a_, dcy in ((89, 3.5, 2.0), (158, 1.2, 1.5), (225, 1.0, 1.5), (317, 1.6, 2.0), (351, 3.0, 2.0), (433, 2.5, 2.0)):
             if f >= ff:
                 v += a_ * math.exp(-(f - ff) / dcy)
@@ -4130,7 +4130,7 @@ def build_edit(sc3d, A, S):
             ms = C.new_sound(name="Music", filepath=music, channel=10, frame_start=F0 - int(round(MUSIC_START * FPS)))
             ms.frame_offset_start = int(round(MUSIC_START * FPS))
             ms.frame_final_end = F1 + 1
-            bake(ed, ms.path_from_id("volume"), -1, [F0, F0 + 4, F1 - 12, F1], [0.0, 1.0, 1.0, 0.0], 'LINEAR')
+            bake(ed, ms.path_from_id("volume"), -1, [F0, F0 + 4, F1 - 12, F1], [0.0, 0.8, 0.8, 0.0], 'LINEAR')
             log("music:", music)
         else:
             log("!!! mp3 не найден - положи его рядом со скриптом или укажи MUSIC_PATH")
@@ -4145,7 +4145,7 @@ def build_edit(sc3d, A, S):
         snd("swell", DROP - int(2.6 * FPS), 0.7, 12)
         snd("bell", 3, 0.45, 13)
         snd("bell", BREAK, 0.55, 13, name="bell_break")
-        for f, v in ((DROP, 0.95), (DROP2, 0.8), (433, 0.75)):
+        for f, v in ((DROP, 0.7), (DROP2, 0.6), (433, 0.55)):
             snd("impact", f, v, 14)
         for i, (f, v) in enumerate(((1, 0.5), (84, 0.45), (266, 0.3), (314, 0.25), (345, 0.4), (418, 0.35), (430, 0.4), (444, 0.6))):
             snd("static", f, v, 15 + (i % 2))
