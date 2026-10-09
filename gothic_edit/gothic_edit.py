@@ -1216,7 +1216,7 @@ def build_materials():
     fall = b.math('MULTIPLY', b.math('SUBTRACT', 1.0, rn, clamp=True),
                   b.math('MULTIPLY', b.math('SUBTRACT', rn, 0.075), 30.0, clamp=True))
     dens = b.math('MULTIPLY', b.math('POWER', nz.outputs['Fac'], 2.2), fall)
-    strength = b.math('MULTIPLY', dens, 40.0)
+    strength = b.math('MULTIPLY', dens, 9.0)
     e = b.emission(heat.outputs[0], strength)
     tr = b.n('ShaderNodeBsdfTransparent')
     mx = b.n('ShaderNodeMixShader')
@@ -1235,7 +1235,7 @@ def build_materials():
     b = NB(m)
     lw = b.n('ShaderNodeLayerWeight', Blend=0.4)
     col = b.ramp(lw.outputs['Facing'], [(0.0, '#fff4d8'), (0.6, '#ff7020'), (1.0, '#600010')])
-    b.output(b.emission(col.outputs[0], 60.0))
+    b.output(b.emission(col.outputs[0], 25.0))
 
     m = new_mat("Debris")
     b = NB(m)
@@ -1540,7 +1540,7 @@ def build_cathedral():
     build_altar()
 
 
-def rose_window(mb, center, R, mat_stone, mat_glass, rot):
+def rose_window(mb, center, R, mat_stone, mat_glass, rot, glass=True):
     """роза-окно: кольца, спицы, лепестки-трилистники, стекло"""
     c = Vector(center)
     mb.torus(c, R, 0.18, mat_stone, 64, 10, rot=rot)
@@ -1555,6 +1555,8 @@ def rose_window(mb, center, R, mat_stone, mat_glass, rot):
         a2 = a + math.pi / n
         mb.torus(c + rot @ Vector((math.cos(a2), math.sin(a2), 0)) * R * 0.7, R * 0.17, 0.05, mat_stone, 24, 6, rot=rot)
         mb.torus(c + rot @ Vector((math.cos(a2), math.sin(a2), 0)) * R * 0.92, R * 0.06, 0.035, mat_stone, 16, 6, rot=rot)
+    if not glass:
+        return
     # стекло (диск)
     pts = [(math.cos(a) * R, math.sin(a) * R) for a in np.linspace(0, 2 * math.pi, 64, endpoint=False)]
     verts = [mb.bm.verts.new(c + rot @ Vector((x, y, 0))) for x, y in pts]
@@ -1591,8 +1593,11 @@ def build_facade(C):
                       Matrix.Translation((x, 0, 0)))
         mb.cube((x, FY0 - 0.25, 0.6), (1.6, 0.5, 1.2), 1)
         mb.prism(lancet_poly(1.5, 4.0 - 1.2, 1.2, 8, z0=1.2), FY0 - 0.02, FY0 + 0.02, 3, Matrix.Translation((x, 0, 0)))
-    rose_window(mb, (0, FY0 - 0.15, ROSE_Z), ROSE_R, 1, 2, Matrix.Rotation(math.pi / 2, 3, 'X'))
+    rose_window(mb, (0, FY0 - 0.15, ROSE_Z), ROSE_R, 1, 2, Matrix.Rotation(math.pi / 2, 3, 'X'), glass=False)
+    rose_window(mb, (0, FY1 - 0.08, ROSE_Z), ROSE_R, 1, 2, Matrix.Rotation(math.pi / 2, 3, 'X'), glass=False)
+    rose_window(mb, (0, (FY0 + FY1) / 2, ROSE_Z), ROSE_R, 1, 2, Matrix.Rotation(math.pi / 2, 3, 'X'), glass=True)
     mb.torus((0, FY0 - 0.35, ROSE_Z), ROSE_R + 0.45, 0.32, 1, 64, 10, rot=Matrix.Rotation(math.pi / 2, 3, 'X'))
+    mb.torus((0, FY1 + 0.1, ROSE_Z), ROSE_R + 0.45, 0.32, 1, 64, 10, rot=Matrix.Rotation(math.pi / 2, 3, 'X'))
     for i in range(-6, 7):
         x = i * 1.25
         mb.ring_prism(arch_curve(0.8, 0.6, 6, base=22.8), arch_curve(1.05, 0.75, 6, base=22.8), FY0 - 0.3, FY0, 1,
@@ -2248,7 +2253,9 @@ def hair_locks(spec, Hc, radii, rnd):
         p = Vector((Hc.x + d0.x * rx, Hc.y + d0.y * ry, Hc.z + d0.z * rz))
         p = collide(p, off * 0.5)
         pts = [p.copy()]
-        dirv = (d0 * stiff + Vector((0, 0, -1)) * (1 - stiff)).normalized()
+        back = Vector((0, 1.0 if d0.y < 0.2 else 0.35, -0.25 if d0.z > 0.3 else -0.6))
+        dirv = (d0 * stiff * 0.6 + back * (1 - stiff * 0.6)).normalized() if bias.y > 0 else \
+            (d0 * stiff + Vector((0, 0, -1)) * (1 - stiff)).normalized()
         seg = length / nseg
         side = d0.cross(Vector((0, 0, 1)))
         if side.length < 1e-3:
@@ -2288,9 +2295,9 @@ def hair_locks(spec, Hc, radii, rnd):
         L = spec["length"] * rnd.uniform(0.88, 1.08)
         if d.y < -0.1:
             L *= spec.get("front_len", 1.0)
-        bias = Vector((0, 0.12 if d.y > -0.2 else -0.05, 0)) * spec.get("back_bias", 1.0)
-        if spec.get("front_drape") and abs(d.x) > 0.45 and d.y < 0.15:
-            bias = Vector((d.x * 0.05, -0.18, 0))
+        bias = Vector((0, 0.16 if d.y > -0.05 else 0.3, 0)) * spec.get("back_bias", 1.0)
+        if spec.get("front_drape") and abs(d.x) > 0.62 and d.y < 0.1 and d.z < 0.55:
+            bias = Vector((d.x * 0.08, -0.16, 0))
         pts = grow(d, L, spec.get("nseg", 22), layer, G, bias, spec.get("wave", 0.0), spec.get("wave_len", 0.1), spec.get("stiff", 0.55))
         w0 = spec.get("width", 0.03) * rnd.uniform(0.8, 1.2)
         widths = [w0 * (1 - 0.85 * (k / (len(pts) - 1)) ** 1.5) for k in range(len(pts))]
@@ -2628,8 +2635,8 @@ def build_characters():
     cup2 = bpy.data.objects.new(PREFIX + "_LeanCup_Hand", cup_src.data)
     C.objects.link(cup2)
     bone_parent(cup2, CHARS["Lilith"]["arm"], "hand.R")
-    cup2.matrix_basis = Matrix.Translation((0.0, 0.0, 0.0)) @ Euler((math.radians(-95), 0, 0)).to_matrix().to_4x4() @ Matrix.Translation((0, 0, -0.06))
-    cup2.location = (-0.01, -0.03, -0.03)
+    # базис в пространстве арматуры (рест-поза): стакан в ладони правой руки
+    cup2.matrix_basis = Matrix.Translation((-0.348, -0.052, 0.785))
     liq2 = bpy.data.objects.new(PREFIX + "_LeanLiquid_Hand", bpy.data.objects[PREFIX + "_LeanLiquid"].data)
     C.objects.link(liq2)
     liq2.parent = cup2
@@ -2839,8 +2846,10 @@ def build_black_hole():
     halo = bpy.data.objects.new(PREFIX + "_BH_Halo", disk.data)
     C.objects.link(halo)
     halo.parent = root
-    halo.scale = (0.55, 0.55, 0.55)
+    halo.scale = (0.24, 0.24, 0.24)
     BH.update(root=root, disk=disk, halo=halo, ring=ring)
+    bake(halo, "hide_render", -1, [F0, SHOT["S1_blackhole"][1] + 1], [0.0, 1.0], interp='CONSTANT')
+    bake(halo, "hide_viewport", -1, [F0, SHOT["S1_blackhole"][1] + 1], [0.0, 1.0], interp='CONSTANT')
     # вращение диска
     for ob, sp in ((disk, 1.0),):
         bake(ob, "rotation_euler", 2, [F0, F1], [0.0, -sp * 9.0], interp='LINEAR')
@@ -2910,7 +2919,7 @@ def build_black_hole():
         bake(ob, "rotation_euler", 2, frames, RZ)
     # свет от диска
     ld = bpy.data.lights.new(PREFIX + "_BH_Light", 'POINT')
-    ld.energy = 2.5e6
+    ld.energy = 4e5
     ld.color = hexcol('#ff6a3a')[:3]
     ld.shadow_soft_size = 6.0
     lo = bpy.data.objects.new(PREFIX + "_BH_Light", ld)
@@ -3626,8 +3635,8 @@ def build_compositor(sc, assets):
                 break
             except Exception:
                 pass
-        set_in(gl, 'Threshold', 0.9)
-        set_in(gl, 'Strength', 0.6)
+        set_in(gl, 'Threshold', 1.2)
+        set_in(gl, 'Strength', 0.35)
         set_in(gl, 'Size', 0.75)
         set_in(gl, 'Quality', 'Medium')
         set_in(gl, 'Quality', 'MEDIUM')
